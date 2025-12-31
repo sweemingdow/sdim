@@ -1,0 +1,64 @@
+app-config:
+  app-name: engine_server
+  profile: dev
+  graceful-exit-timeout-mills: 30000
+
+nacos-config:
+  namespace-id: 3d895d20-1011-4184-9252-d6ea8aeac0b8
+  cluster-name: ""
+  addresses: 192.168.1.155:8848
+  username: sdim_dev_a
+  password: 123456ff
+  log-level: debug
+  log-dir: ./.nacos/log
+  cache-dir: ./.nacos/cache
+
+nacos-center-config:
+  # 配置中心
+  config:
+    cluster-name: ""
+    group-name: ENGINE_SRV
+    static:
+      - name: static-config.yaml
+        group-name:
+    dynamic:
+#      - name: dynamic-config.yaml
+#        group-name:
+  # 注册/发现中心
+  registry-discover:
+    cluster-name: ""
+    group-name: SDIM_RD
+    discover-dial-timeout-mills: 2000
+
+log-config:
+  level: trace
+  file-log-config:
+    file-path: ./.logs
+    max-file-size: 10
+    max-backup: 3
+    history-days: 7
+    compress: true
+  remote-log-config:
+    host: 192.168.1.155
+    port: 5171
+    reconnect-max-delay-mills: 30000
+    queue-size: 200
+    stop-timeout-mills: 5000
+    must-connected-in-init: true
+    batch-timing-mills: 100
+    batch-quantitative-size: 100
+    debug: false
+
+nsq-config:
+  producer:
+    nsqd-addr: 192.168.1.155:4150
+  consumer:
+    lookupd-addresses: [192.168.1.155:4171]
+    heartbeat-interval: 60s
+    consume-items:
+      - topic: topic_test_v1
+        channel: channel_v1
+        Concurrency: 2
+        MaxAttempts: 1
+        msg-timeout: 10s
+        requeue-delay-when-retry: 1s
