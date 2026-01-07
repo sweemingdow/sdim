@@ -2,6 +2,7 @@ package fcodec
 
 import (
 	"github.com/sweemingdow/sdim/external/eglobal/chatconst"
+	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
 	"github.com/sweemingdow/sdim/pkg/constt"
 )
 
@@ -22,14 +23,15 @@ type (
 type (
 	ErrCode uint32
 
-	SendFrameBody struct {
-		Sender    string             `json:"sender,omitempty"`   // 发送者uid
-		Receiver  string             `json:"receiver,omitempty"` // 接收者, 单聊是对方的uid, 群聊是群id
-		ChatType  chatconst.ChatType `json:"chatType,omitempty"`
-		SendMills int64              `json:"sendMills,omitempty"`
-		Sign      string             `json:"sign,omitempty"` // 消息签名, 防纂改
-		Ttl       int32              `json:"ttl,omitempty"`  // 消息过期时间(sec), -1:阅后即焚,0:不过期
-		MsgBody   any                `json:"msgBody,omitempty"`
+	SendFrame struct {
+		Sender         string               `json:"sender,omitempty"`   // 发送者uid
+		Receiver       string               `json:"receiver,omitempty"` // 接收者, 单聊是对方的uid, 群聊是群id
+		ChatType       chatconst.ChatType   `json:"chatType,omitempty"`
+		SendMills      int64                `json:"sendMills,omitempty"`
+		Sign           string               `json:"sign,omitempty"`           // 消息签名, 防纂改
+		Ttl            int32                `json:"ttl,omitempty"`            // 消息过期时间(sec), -1:阅后即焚,0:不过期
+		ClientUniqueId string               `json:"clientUniqueId,omitempty"` // 客户端唯一id
+		MsgContent     *msgmodel.MsgContent `json:"msgContent,omitempty"`
 	}
 
 	SendFrameAck struct {
@@ -39,8 +41,9 @@ type (
 	}
 
 	SendFrameAckBody struct {
-		MsgId  int64  `json:"msgId,omitempty"`  // 消息id
-		ConvId string `json:"convId,omitempty"` // 会话id
+		ClientUniqueId string `json:"clientUniqueId,omitempty"` // 客户端唯一id
+		MsgId          int64  `json:"msgId,omitempty"`          // 消息id
+		ConvId         string `json:"convId,omitempty"`         // 会话id
 	}
 )
 

@@ -56,7 +56,7 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 		if conns, ok := uid2conns[mebUid]; ok {
 			lg.Trace().Str("uid", mebUid).Msgf("forwarding msg, connSize:%d", len(conns))
 			for _, conn := range conns {
-				fr, _ := fcodec.NewRecvFrame(msp.ReqId, bodies)
+				fr, _ := fcodec.NewForwardFrame(msp.ReqId, bodies)
 
 				b, _ := mfh.frCodec.Encode(fr)
 				_, err = conn.Write(b)

@@ -98,8 +98,8 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 
 		msgBody := &msgpd.StorageMsgBody{
 			SenderInfo: msgpd.SenderInfo{
-				SendNickname: info.Nickname,
-				SendAvatar:   info.Avatar,
+				Nickname: info.Nickname,
+				Avatar:   info.Avatar,
 			},
 			Content: msgPd.MsgContent,
 		}
@@ -108,7 +108,7 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 
 		pojo, _ := mrh.msgPd2pojo(msgPd, bodies)
 
-		_, ie = mrh.mr.UpsertMsg(200*time.Millisecond, pojo)
+		_, ie = mrh.mr.UpsertMsg(300*time.Millisecond, pojo)
 
 		if ie != nil {
 			lg.Error().Stack().Err(ie).Msgf("upsert msg failed, msgPayload:%+v", msgPd)
@@ -121,7 +121,9 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 		fpd := msgpd.ReceivePd2forwardPd(&msgPd, msgBody)
 		data, _ := json.Fmt(fpd)
 
-		// upsert成功, 发送到engine_server, 转发到对应客户端
+		// upsert成功
+		// 发送到engine_server, 转发到对应客户端
+		// 发送到topic_server, 更新会话
 		ie = mrh.nsqPd.Publish(cnsq.PublishParam{
 			Topic:   nsqconst.MsgForwardTopic,
 			Payload: data,

@@ -59,7 +59,7 @@ func (uir *userInfoRepository) FindUserState(uid string) (usermodel.UserState, e
 func (uir *userInfoRepository) FindUsersUnitInfo(uids []string) (map[string]*UserUnitInfo, error) {
 	var infoItems []*UserUnitInfo
 	err := uir.sc.WithSess(func(sess *dbr.Session) error {
-		_, e := sess.Select("id as uid, nickname, avatar").From("t_user").Where("uid in ?", uids).Load(&infoItems)
+		_, e := sess.Select("uid, nickname, avatar").From("t_user").Where("uid in ?", uids).Load(&infoItems)
 		if e != nil {
 			return e
 		}
@@ -79,7 +79,7 @@ func (uir *userInfoRepository) FindUsersUnitInfo(uids []string) (map[string]*Use
 func (uir *userInfoRepository) FindUserUnitInfo(uid string) (*UserUnitInfo, error) {
 	var uui UserUnitInfo
 	err := uir.sc.WithSess(func(sess *dbr.Session) error {
-		return sess.Select("id as uid, nickname, avatar").From("t_user").Where("uid = ?", uid).LoadOne(&uui)
+		return sess.Select("uid, nickname, avatar").From("t_user").Where("uid = ?", uid).LoadOne(&uui)
 	})
 
 	if err != nil {

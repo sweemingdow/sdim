@@ -143,7 +143,7 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 	return fh.pool.Submit(func() {
 		for _, fr := range frs {
 			if fr.Header.Ftype == fcodec.Send { // Send帧
-				var sendFrb fcodec.SendFrameBody
+				var sendFrb fcodec.SendFrame
 				derr := fcodec.DecodePayload(fr.Payload, &sendFrb)
 				if derr != nil {
 					lg.Error().Stack().Err(derr).Msg("decode send frame body failed, kick it")
@@ -155,14 +155,15 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 
 				clg := lg.With().Str("req_id", reqId).Logger()
 
-				clg.Debug().Msgf("handle send frame, body:%+v", sendFrb)
+				clg.Debug().Msgf("handle send frame, frame:%+v, msgContent:%+v", sendFrb, *sendFrb.MsgContent)
 
 				req := rpctopic.MsgComingReq{
-					Sender:   sendFrb.Sender,
-					Receiver: sendFrb.Receiver,
-					ChatType: sendFrb.ChatType,
-					Ttl:      sendFrb.Ttl,
-					MsgBody:  sendFrb.MsgBody,
+					Sender:         sendFrb.Sender,
+					Receiver:       sendFrb.Receiver,
+					ChatType:       sendFrb.ChatType,
+					Ttl:            sendFrb.Ttl,
+					ClientUniqueId: sendFrb.ClientUniqueId,
+					MsgContent:     sendFrb.MsgContent,
 				}
 
 				// rpc: 调用TopicServer
@@ -208,8 +209,9 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 					fcodec.SendFrameAck{
 						ErrCode: fcodec.OK,
 						Data: fcodec.SendFrameAckBody{
-							MsgId:  resp.Resp.MsgId,
-							ConvId: resp.Resp.ConvId,
+							MsgId:          resp.Resp.MsgId,
+							ClientUniqueId: resp.Resp.ClientUniqueId,
+							ConvId:         resp.Resp.ConvId,
 						},
 					},
 					fr,
@@ -301,7 +303,7 @@ func (fh *asyncFrameHandler) writeSendAckFrame(sfa fcodec.SendFrameAck, fr fcode
 
 func (fh *asyncFrameHandler) validExceptFrames(frs []fcodec.Frame, c gnet.Conn) error {
 	for _, fr := range frs {
-		if fr.Header.Ftype != fcodec.Send && fr.Header.Ftype != fcodec.RecvAck {
+		if fr.Header.Ftype != fcodec.Send && fr.Header.Ftype != fcodec.ForwardAck {
 			_ = c.Close()
 			return fmt.Errorf("invalid frame:%s be handle, kick it", fcodec.GetFrameTypeDesc(fr.Header.Ftype))
 		}

@@ -7,8 +7,10 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
+	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel/chatpojo"
 	"strconv"
+	"time"
 )
 
 type (
@@ -23,7 +25,7 @@ type (
 
 	ConvItem struct {
 		OwnerUid     string // 会话的所有者
-		RelationUid  string // 会话的关联者
+		RelationId   string // 会话的关联者
 		ConvType     int8
 		Icon         string
 		Title        string
@@ -38,16 +40,17 @@ type (
 
 const convTreeLuaScript = `
 local hk = KEYS[1]
-local seq = redis.call('HINCRBY', hk, 'msgSeq', 1)
-redis.call('HMSET', hk, ARGV[1], seq, 'lastMsgId', ARGV[2])
+local seq = redis.call('HINCRBY', hk, 'msg_seq', 1)
+redis.call('HMSET', hk, ARGV[1], seq, 'last_msg_id', ARGV[2], 'last_active_ts', ARGV[3])
 return seq
 `
 
 const (
 	convTreeKeyPrefix  = "conv_tree:"
-	browseSeqKeyPrefix = "browse_seq:uid:"
-	lastMsgIdKey       = "last_msg_id"
-	msgSeqKey          = "msg_seq"
+	BrowseSeqKeyPrefix = "browse_seq:uid:"
+	LastMsgIdKey       = "last_msg_id"
+	LastActiveTs       = "last_active_ts"
+	MsgSeqKey          = "msg_seq"
 )
 
 /*
@@ -66,7 +69,9 @@ type (
 
 		UpsertConv(ctx context.Context, conv *Conv) error
 
-		ModifyConvTree(ctx context.Context, sender, convId string, msgId int64) (int64, error)
+		ModifyConvTree(ctx context.Context, sender, convId string, msgId int64) (int64, int64, error)
+
+		GetConvTree(ctx context.Context, convId string, uids []string) (map[string]string, error)
 	}
 
 	convRepository struct {
@@ -109,16 +114,16 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 	ctsSetting := false
 	for i, item := range items {
 		conv.Items[i] = &ConvItem{
-			OwnerUid:    item.OwnerUid,
-			RelationUid: item.RelationUid,
-			ConvType:    item.ConvType,
-			Title:       item.ConvTitle.String,
-			Icon:        item.ConvIcon.String,
-			Remark:      item.ConvRemark.String,
-			PinTop:      item.PinTop.Int16 == 1,
-			NoDisturb:   item.NoDisturb.Int16 == 1,
-			Cts:         item.Cts,
-			Uts:         item.Uts.Int64,
+			OwnerUid:   item.OwnerUid,
+			RelationId: item.RelationId,
+			ConvType:   item.ConvType,
+			Title:      item.ConvTitle.String,
+			Icon:       item.ConvIcon.String,
+			Remark:     item.ConvRemark.String,
+			PinTop:     item.PinTop.Int16 == 1,
+			NoDisturb:  item.NoDisturb.Int16 == 1,
+			Cts:        item.Cts,
+			Uts:        item.Uts.Int64,
 		}
 
 		if !ctsSetting {
@@ -129,7 +134,7 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 
 	var convTree map[string]string
 	err = cr.rc.With(func(cli redis.UniversalClient) error {
-		m, e := cli.HGetAll(ctx, cr.pkgConvTreeKey(convId)).Result()
+		m, e := cli.HGetAll(ctx, pkgConvTreeKey(convId)).Result()
 		if e != nil {
 			return e
 		}
@@ -143,18 +148,18 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 	}
 
 	if len(convTree) > 0 {
-		if val, ok := convTree[msgSeqKey]; ok {
+		if val, ok := convTree[MsgSeqKey]; ok {
 			seq, _ := strconv.ParseInt(val, 10, 64)
 			conv.MsgSeq = seq
 		}
 
-		if val, ok := convTree[lastMsgIdKey]; ok {
+		if val, ok := convTree[LastMsgIdKey]; ok {
 			msgId, _ := strconv.ParseInt(val, 10, 64)
 			conv.LastMsgId = msgId
 		}
 
 		for _, item := range conv.Items {
-			if val, ok := convTree[cr.pkgBrowseSeqKey(item.OwnerUid)]; ok {
+			if val, ok := convTree[PkgBrowseSeqKey(item.OwnerUid)]; ok {
 				seq, _ := strconv.ParseInt(val, 10, 64)
 				item.BrowseMsgSeq = seq
 			}
@@ -183,11 +188,11 @@ func (cr *convRepository) UpsertConv(ctx context.Context, conv *Conv) error {
 
 		for _, item := range conv.Items {
 			_, e = tx.InsertBySql(
-				`insert into t_conv_item (conv_id, conv_type, owner_uid, relation_uid, conv_icon, conv_title, browse_msg_seq, cts, uts) values (?,?,?,?,?,?,?,?,?) on duplicate key update conv_icon = values(conv_icon), conv_title = values(conv_title), browse_msg_seq = values(browse_msg_seq), uts = values(uts)`,
+				`insert into t_conv_item (conv_id, conv_type, owner_uid, relation_id, conv_icon, conv_title, browse_msg_seq, cts, uts) values (?,?,?,?,?,?,?,?,?) on duplicate key update conv_icon = values(conv_icon), conv_title = values(conv_title), browse_msg_seq = values(browse_msg_seq), uts = values(uts)`,
 				conv.ConvId,
 				conv.ConvType,
 				item.OwnerUid,
-				item.RelationUid,
+				item.RelationId,
 				item.Icon,
 				item.Title,
 				item.BrowseMsgSeq,
@@ -209,17 +214,17 @@ func (cr *convRepository) UpsertConv(ctx context.Context, conv *Conv) error {
 
 	// 写redis
 	convTree := make(map[string]string, 4)
-	convTree[msgSeqKey] = strconv.FormatInt(conv.MsgSeq, 10)
-	convTree[lastMsgIdKey] = strconv.FormatInt(conv.LastMsgId, 10)
+	convTree[MsgSeqKey] = strconv.FormatInt(conv.MsgSeq, 10)
+	convTree[LastMsgIdKey] = strconv.FormatInt(conv.LastMsgId, 10)
 
 	for _, item := range conv.Items {
-		convTree[cr.pkgBrowseSeqKey(item.OwnerUid)] = "0"
+		convTree[PkgBrowseSeqKey(item.OwnerUid)] = "0"
 	}
 
 	err = cr.rc.With(func(cli redis.UniversalClient) error {
 		return cli.HMSet(
 			ctx,
-			cr.pkgConvTreeKey(conv.ConvId),
+			pkgConvTreeKey(conv.ConvId),
 			umap.Flat(convTree),
 		).Err()
 	})
@@ -231,15 +236,17 @@ func (cr *convRepository) UpsertConv(ctx context.Context, conv *Conv) error {
 	return nil
 }
 
-func (cr *convRepository) ModifyConvTree(ctx context.Context, sender, convId string, msgId int64) (int64, error) {
+func (cr *convRepository) ModifyConvTree(ctx context.Context, sender, convId string, msgId int64) (int64, int64, error) {
 	var seq int64
+	var lastTs = time.Now().UnixMilli()
 	err := cr.rc.With(func(cli redis.UniversalClient) error {
 		val, e := cr.ctScript.Run(
 			ctx,
 			cli,
-			[]string{cr.pkgConvTreeKey(convId)},
-			cr.pkgBrowseSeqKey(sender),
+			[]string{pkgConvTreeKey(convId)},
+			PkgBrowseSeqKey(sender),
 			strconv.FormatInt(msgId, 10),
+			lastTs,
 		).Result()
 
 		if e != nil {
@@ -251,16 +258,53 @@ func (cr *convRepository) ModifyConvTree(ctx context.Context, sender, convId str
 	})
 
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	return seq, nil
+	return seq, lastTs, nil
 }
 
-func (cr *convRepository) pkgConvTreeKey(convId string) string {
+func (cr *convRepository) GetConvTree(ctx context.Context, convId string, uids []string) (map[string]string, error) {
+	uids = usli.Conv(uids, func(uid string) string {
+		return PkgBrowseSeqKey(uid)
+	})
+
+	fields := make([]string, 0, len(uids)+3)
+	fields = append(fields, MsgSeqKey, LastMsgIdKey, LastActiveTs)
+	fields = append(fields, uids...)
+
+	var results []any
+	err := cr.rc.With(func(cli redis.UniversalClient) error {
+		_result, ie := cli.HMGet(ctx, pkgConvTreeKey(convId), fields...).Result()
+		if ie != nil {
+			return ie
+		}
+
+		results = _result
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	rm := make(map[string]string, len(fields))
+	for idx, field := range fields {
+		v, ok := results[idx].(string)
+		if !ok {
+			v = ""
+		}
+		rm[field] = v
+	}
+
+	return rm, nil
+}
+
+func pkgConvTreeKey(convId string) string {
 	return convTreeKeyPrefix + convId
 }
 
-func (cr *convRepository) pkgBrowseSeqKey(uid string) string {
-	return browseSeqKeyPrefix + uid
+func PkgBrowseSeqKey(uid string) string {
+	return BrowseSeqKeyPrefix + uid
 }

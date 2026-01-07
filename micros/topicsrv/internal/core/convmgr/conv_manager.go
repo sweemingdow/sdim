@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/alphadose/haxmap"
 	"github.com/nsqio/go-nsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cid/sfid"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
@@ -12,6 +11,7 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
+	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
 	"github.com/sweemingdow/sdim/external/eglobal/chatconst"
@@ -38,15 +38,15 @@ type convManager struct {
 
 	// uid -> convWrap
 	// 用户所有的会话
-	uid2convItems *haxmap.Map[string, *core.MemberConvWrap]
-
-	segLock      *guc.SegmentRwLock[string]
-	done         chan struct{}
-	closed       atomic.Bool
-	cr           convrepo.ConvRepository
-	nsdPd        *cnsq.NsqProducer
-	doneChan     chan *nsq.ProducerTransaction
-	userProvider rpcuser.UserInfoRpcProvider
+	uid2convItems map[string]*core.MemberConvWrap
+	convSegLock   *guc.SegmentRwLock[string]
+	uidSegLock    *guc.SegmentRwLock[string]
+	done          chan struct{}
+	closed        atomic.Bool
+	cr            convrepo.ConvRepository
+	nsdPd         *cnsq.NsqProducer
+	doneChan      chan *nsq.ProducerTransaction
+	userProvider  rpcuser.UserInfoRpcProvider
 }
 
 func NewConvManager(esCap, strip int,
@@ -57,8 +57,9 @@ func NewConvManager(esCap, strip int,
 	cm := &convManager{
 		//convId2items:  haxmap.New[string, *core.Conversation](uintptr(esCap)),
 		convId2items:  make(map[string]*core.Conversation, esCap),
-		uid2convItems: haxmap.New[string, *core.MemberConvWrap](uintptr(esCap)),
-		segLock:       guc.NewSegmentRwLock[string](strip, nil),
+		uid2convItems: make(map[string]*core.MemberConvWrap, esCap),
+		convSegLock:   guc.NewSegmentRwLock[string](strip, nil),
+		uidSegLock:    guc.NewSegmentRwLock[string](strip, nil),
 		done:          make(chan struct{}),
 		cr:            cr,
 		userProvider:  userProvider,
@@ -81,151 +82,305 @@ func (cm *convManager) GracefulStop(ctx context.Context) error {
 	return nil
 }
 
+type convHandleResult struct {
+	convItems []*convrepo.ConvItem
+	conv      *core.Conversation
+	convTree  map[string]string
+}
+
 func (cm *convManager) OnMsgComing(pa core.MsgComingParam) core.MsgComingResult {
+	ve := msgmodel.ValidateMsgContent(pa.MsgContent)
+
+	if ve != nil {
+		return core.MsgComingResult{
+			Err: ve,
+		}
+	}
+
 	convId := generateConvId(pa)
 	var mcr = core.MsgComingResult{
 		MsgId:  sfid.Next(),
 		ConvId: convId,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
-	defer cancel()
-
-	lg := mylog.AppLogger()
 	convType := chatconst.GetConvTypeWithChatType(pa.ChatType)
 	if pa.IsConvType {
 		if convType == chatconst.P2pConv { // 单聊
-			cn, err := cm.segLock.WithLock(convId, func(lock *sync.RWMutex) (any, error) {
-				lock.RLock()
-				c, ok := cm.convId2items[convId]
-				lock.RUnlock()
-
-				if ok {
-					return c, nil
-				}
-
-				lock.Lock()
-				defer lock.Unlock()
-
-				c, ok = cm.convId2items[convId]
-
-				if ok {
-					return c, nil
-				}
-
-				// db查询会话记录
-				conv, err := cm.cr.FindConvItems(ctx, convId)
-				if err != nil {
-					return nil, err
-				}
-
-				// 会话记录存在
-				if conv != nil {
-					c = cm.dbConv2local(conv)
-					lg.Trace().Str("conv_id", convId).Msg("conversion was exist in db")
-
-					cm.convId2items[convId] = c
-
-					return c, nil
-					// to do
-				} else { // 记录不存在
-					lg.Debug().Str("conv_id", convId).Msg("conversion was not exist in db, create and save now")
-
-					c = &core.Conversation{
-						Id:      convId,
-						Type:    convType,
-						Members: []string{pa.Sender, pa.Receiver},
-					}
-
-					c.ResetMsgSeq(0)
-
-					req := rpccall.CreateIdReq(pa.ReqId, rpcuser.UsersUnitInfoReq{Uids: c.Members})
-					resp, e := cm.userProvider.UsersUnitInfo(req)
-					if e != nil {
-						return nil, e
-					}
-
-					infoMap, e := resp.OkOrErr()
-					if e != nil {
-						return nil, e
-					}
-
-					if len(infoMap) != len(c.Members) {
-						return nil, fmt.Errorf("user unit info results incorrect, size not eq, may users not exists, uids:%v", c.Members)
-					}
-
-					infoSli := umap.ToSli(infoMap)
-					// 存db
-					if e = cm.cr.UpsertConv(ctx, cm.localConv2db(c, infoSli)); e != nil {
-						return nil, e
-					}
-
-					cm.convId2items[convId] = c
-
-					// todo 触发事件, 会话创建
-					return c, nil
-				}
-			})
-
-			if err != nil {
-				mcr.Err = err
-				return mcr
-			}
-
-			mc, err := msgmodel.ParseMsgContent(pa.MsgBody)
-
-			if err != nil {
-				mcr.Err = err
-				return mcr
-			}
-
-			// 自增
-			_ctx, _cancel := context.WithTimeout(context.Background(), 1*time.Second)
-			defer _cancel()
-
-			seq, err := cm.cr.ModifyConvTree(_ctx, pa.Sender, convId, mcr.MsgId)
-
-			if err != nil {
-				mcr.Err = err
-				return mcr
-			}
-
-			conv := cn.(*core.Conversation)
-
-			// exclude self
-			mebUid, ok := usli.FindFirstIf(conv.Members, func(val string) bool {
-				return val != pa.Sender
-			})
-			if !ok {
-				err = errors.New("can not found receiver in conv:" + convId)
-				mcr.Err = err
-				return mcr
-			}
-
-			err = cm.sendMsgWithMq(&msgpd.MsgSendReceivePayload{
-				ConvId:     convId,
-				MsgId:      mcr.MsgId,
-				MsgSeq:     seq,
-				ChatType:   pa.ChatType,
-				Sender:     pa.Sender,
-				Receiver:   pa.Receiver,
-				Members:    []string{mebUid},
-				ReqId:      pa.ReqId,
-				SendTs:     time.Now().UnixMilli(),
-				MsgContent: mc,
-			})
-
-			if err != nil {
+			if err := cm.p2pConvHandle(convId, mcr.MsgId, convType, pa); err != nil {
 				mcr.Err = err
 				return mcr
 			}
 		}
-
 	} else { // Danmaku
 
 	}
 
 	return mcr
+}
+
+func (cm *convManager) OnMsgStored(pd *msgpd.MsgSendReceivePayload) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatconst.ConvType, pa core.MsgComingParam) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second)
+	defer cancel()
+
+	lg := mylog.AppLogger()
+
+	// 处理会话
+	chrVal, convErr := cm.convSegLock.WithLock(
+		convId,
+		func(lock *sync.RWMutex) (any, error) {
+			lock.RLock()
+			c, ok := cm.convId2items[convId]
+			lock.RUnlock()
+
+			if ok {
+				return convHandleResult{
+					conv: c,
+				}, nil
+			}
+
+			lock.Lock()
+			defer lock.Unlock()
+
+			c, ok = cm.convId2items[convId]
+
+			if ok {
+				return convHandleResult{
+					conv: c,
+				}, nil
+			}
+
+			// db查询会话记录
+			conv, err := cm.cr.FindConvItems(ctx, convId)
+			if err != nil {
+				return convHandleResult{}, err
+			}
+
+			// 会话记录存在
+			if conv != nil {
+				c = cm.dbConv2local(conv)
+				lg.Trace().Str("conv_id", convId).Msg("conversion was exist in db")
+
+				cm.convId2items[convId] = c
+
+				uids := usli.Conv(conv.Items, func(item *convrepo.ConvItem) string {
+					return item.OwnerUid
+				})
+				// 从redis捞取convTree信息
+				convTree, err := cm.cr.GetConvTree(ctx, convId, uids)
+				if err != nil {
+					return convHandleResult{}, err
+				}
+
+				lg.Trace().Str("conv_id", convId).Msgf("found convTree, convTree:%+v", convTree)
+
+				var (
+					lastMsgId    int64
+					msgSeq       int64
+					lastActiveTs int64
+				)
+
+				val := convTree[convrepo.LastMsgIdKey]
+				if val != "" {
+					lastMsgId = utils.MustParseI64(val)
+				}
+				val = convTree[convrepo.MsgSeqKey]
+				if val != "" {
+					msgSeq = utils.MustParseI64(val)
+				}
+				val = convTree[convrepo.LastActiveTs]
+				if val != "" {
+					lastActiveTs = utils.MustParseI64(val)
+				}
+
+				c.LastActiveTs = lastActiveTs
+				c.MsgSeq = msgSeq
+				c.LastMsgId = lastMsgId
+
+				return convHandleResult{
+					conv:      c,
+					convItems: conv.Items,
+				}, nil
+				// to do
+			} else { // 记录不存在
+				lg.Debug().Str("conv_id", convId).Msg("conversion was not exist in db, create and save now")
+
+				c = &core.Conversation{
+					Id:      convId,
+					Type:    convType,
+					Members: []string{pa.Sender, pa.Receiver},
+				}
+
+				req := rpccall.CreateIdReq(pa.ReqId, rpcuser.UsersUnitInfoReq{Uids: c.Members})
+				resp, err := cm.userProvider.UsersUnitInfo(req)
+				if err != nil {
+					return convHandleResult{}, err
+				}
+
+				infoMap, err := resp.OkOrErr()
+				if err != nil {
+					return convHandleResult{}, err
+				}
+
+				if len(infoMap) != len(c.Members) {
+					return convHandleResult{}, fmt.Errorf("user unit info results incorrect, size not eq, may users not exists, uids:%v", c.Members)
+				}
+
+				infoSli := umap.ToSli(infoMap)
+				// 存db
+
+				conv = cm.localConv2db(c, infoSli)
+				if err = cm.cr.UpsertConv(ctx, conv); err != nil {
+					return convHandleResult{}, err
+				}
+
+				cm.convId2items[convId] = c
+
+				return convHandleResult{
+					conv:      c,
+					convItems: conv.Items,
+				}, nil
+			}
+		})
+
+	if convErr != nil {
+		return convErr
+	}
+
+	chr := chrVal.(convHandleResult)
+
+	// 处理用户会话
+	if len(chr.convItems) > 0 {
+		var (
+			browseSeq int64
+			msgSeq    int64
+		)
+
+		convTree := chr.convTree
+		val := convTree[convrepo.MsgSeqKey]
+		if val != "" {
+			msgSeq = utils.MustParseI64(val)
+		}
+
+		for _, convItem := range chr.convItems {
+			browseSeqVal := convTree[convrepo.PkgBrowseSeqKey(convItem.OwnerUid)]
+			if browseSeqVal != "" {
+				browseSeq = utils.MustParseI64(browseSeqVal)
+			}
+
+			if browseSeq == 0 {
+				browseSeq = convItem.BrowseMsgSeq
+			}
+
+			unreadCnt := msgSeq - browseSeq
+			if unreadCnt < 0 {
+				unreadCnt = 0
+			}
+
+			uid := convItem.OwnerUid
+			_, _ = cm.uidSegLock.WithLock(uid, func(lock *sync.RWMutex) (any, error) {
+				lock.RLock()
+				ci, ok := cm.uid2convItems[uid]
+				lock.RUnlock()
+
+				if ok {
+					lock.Lock()
+					// 更新部分属性
+					if mebConv, ok := ci.ConvId2Item[convId]; ok {
+						mebConv.Title = convItem.Title
+						mebConv.Icon = convItem.Icon
+						mebConv.BrowseMsgSeq = browseSeq
+						mebConv.UnreadCount = unreadCnt
+					}
+
+					lock.Unlock()
+					return nil, nil
+				}
+
+				lock.Lock()
+				defer lock.Unlock()
+
+				ci, ok = cm.uid2convItems[uid]
+
+				if ok {
+					if mebConv, ok := ci.ConvId2Item[convId]; ok {
+						mebConv.Title = convItem.Title
+						mebConv.Icon = convItem.Icon
+						mebConv.BrowseMsgSeq = browseSeq
+						mebConv.UnreadCount = unreadCnt
+					}
+					return nil, nil
+				}
+
+				ci = &core.MemberConvWrap{
+					ConvId2Item: make(map[string]*core.MemberConv, 100),
+					ConvItems:   make([]*core.MemberConv, 0, 100),
+				}
+
+				cm.uid2convItems[uid] = ci
+
+				mebConv := &core.MemberConv{
+					Id:           convId,
+					Type:         convType,
+					Icon:         convItem.Icon,
+					Title:        convItem.Title,
+					RelationId:   convItem.RelationId,
+					Remark:       convItem.Remark,
+					PinTop:       convItem.PinTop,
+					NoDisturb:    convItem.NoDisturb,
+					BrowseMsgSeq: browseSeq,
+					UnreadCount:  unreadCnt,
+					Cts:          convItem.Cts,
+					Uts:          convItem.Uts,
+				}
+
+				ci.ConvId2Item[convId] = mebConv
+				ci.ConvItems = append(ci.ConvItems, mebConv)
+
+				return nil, nil
+			})
+		}
+	}
+
+	seq, lastTs, err := cm.cr.ModifyConvTree(context.Background(), pa.Sender, convId, msgId)
+
+	if err != nil {
+		return err
+	}
+
+	// exclude self
+	mebUid, ok := usli.FindFirstIf(chr.conv.Members, func(val string) bool {
+		return val != pa.Sender
+	})
+
+	if !ok {
+		return errors.New("can not found receiver in conv:" + convId)
+	}
+
+	err = cm.sendMsgWithMq(&msgpd.MsgSendReceivePayload{
+		ConvId:           convId,
+		ConvLastActiveTs: lastTs,
+		MsgId:            msgId,
+		ClientUniqueId:   pa.ClientUniqueId,
+		MsgSeq:           seq,
+		ChatType:         pa.ChatType,
+		Sender:           pa.Sender,
+		Receiver:         pa.Receiver,
+		Members:          []string{mebUid},
+		ReqId:            pa.ReqId,
+		SendTs:           time.Now().UnixMilli(),
+		MsgContent:       pa.MsgContent,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (cm *convManager) sendMsgWithMq(pd *msgpd.MsgSendReceivePayload) error {
@@ -251,8 +406,6 @@ func (cm *convManager) dbConv2local(conv *convrepo.Conv) *core.Conversation {
 		}),
 	}
 
-	c.ResetMsgSeq(uint64(conv.MsgSeq))
-
 	return c
 }
 
@@ -274,11 +427,11 @@ func (cm *convManager) localConv2db(c *core.Conversation, infoSli []*rpcuser.Uni
 		title := info.Nickname
 
 		conv.Items[i] = &convrepo.ConvItem{
-			OwnerUid:    meb,
-			RelationUid: info.Uid,
-			Icon:        icon,
-			Title:       title,
-			Cts:         conv.Cts,
+			OwnerUid:   meb,
+			RelationId: info.Uid,
+			Icon:       icon,
+			Title:      title,
+			Cts:        conv.Cts,
 		}
 	}
 
@@ -313,12 +466,12 @@ func (cm *convManager) receiveMqSendAsyncResult() {
 
 			lg.Trace().Str("conv_id", convId).Int64("msg_seq", msgSeq).Msg("mq msg async send success")
 
-			cm.segLock.PureRead(convId, func() {
-				if conv, ok := cm.convId2items[convId]; ok {
-					// 设置消息序列号自增
-					conv.SetMsgSeq(msgSeq)
-				}
-			})
+			//cm.convSegLock.PureRead(convId, func() {
+			//	if conv, ok := cm.convId2items[convId]; ok {
+			//		// 设置消息序列号自增
+			//		//conv.SetMsgSeq(msgSeq)
+			//	}
+			//})
 		}
 	}
 }

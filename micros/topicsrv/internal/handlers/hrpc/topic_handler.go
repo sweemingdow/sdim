@@ -65,7 +65,7 @@ func (th *TopicHandler) HandleMsgComing(c *arpc.Context) {
 		var resp = rpccall.SimpleErrDesc(rst.Err.Error())
 		srpc.WriteLoggedIfError(c, resp)
 	} else {
-		var resp = rpccall.Ok(core.MsgComingResultTo(rst))
+		var resp = rpccall.Ok(core.MsgComingResultTo(rst, param.ClientUniqueId))
 
 		if ok := srpc.WriteLoggedIfError(c, resp); ok {
 			plg := rpccall.LoggerWrapWithResp(req.ReqId, resp, lg)

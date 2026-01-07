@@ -26,8 +26,8 @@ const (
 	ConnAck    FrameType = 4 // 连接确认(s2c)
 	Send       FrameType = 5 // 发送消息(c2s)
 	SendAck    FrameType = 6 // 发送消息确认(s2c)
-	Recv       FrameType = 7 // 收到消息(s2c)
-	RecvAck    FrameType = 8 // 收到消息确认(c2s)
+	Forward    FrameType = 7 // 转发消息(s2c)
+	ForwardAck FrameType = 8 // 收到转发消息确认(c2s)
 	Disconnect FrameType = 9 // 断开连接(服务端主动发起)
 )
 
@@ -39,8 +39,8 @@ var (
 		ConnAck:    "ConnAck",
 		Send:       "Send",
 		SendAck:    "SendAck",
-		Recv:       "Recv",
-		RecvAck:    "RecvAck",
+		Forward:    "Forward",
+		ForwardAck: "ForwardAck",
 		Disconnect: "Disconnect",
 	}
 )
@@ -129,11 +129,11 @@ func NewS2cFrame(from Payload, ft FrameType, body any) (Frame, error) {
 	}, nil
 }
 
-func NewRecvFrame(reqId string, bodies []byte) (Frame, error) {
+func NewForwardFrame(reqId string, bodies []byte) (Frame, error) {
 	frh := FrameHeader{
 		Magic:      MagicNumber,
 		Version:    Version,
-		Ftype:      Recv,
+		Ftype:      Forward,
 		PayloadLen: uint32(1 + ReqIdSize + len(bodies)),
 		CheckSum:   0,
 	}
