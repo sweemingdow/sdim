@@ -9,6 +9,7 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/msgpd"
+	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel/msgpojo"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/repostories/msgrepo"
@@ -96,17 +97,17 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 			return
 		}
 
-		msgBody := &msgpd.StorageMsgBody{
-			SenderInfo: msgpd.SenderInfo{
+		msg := &msgpd.Msg{
+			SenderInfo: msgmodel.SenderInfo{
 				Nickname: info.Nickname,
 				Avatar:   info.Avatar,
 			},
 			Content: msgPd.MsgContent,
 		}
 
-		bodies, _ := json.Fmt(msgBody)
+		bodies, _ := json.Fmt(msg)
 
-		pojo, _ := mrh.msgPd2pojo(msgPd, bodies)
+		pojo, tsMills, _ := mrh.msgPd2pojo(msgPd, bodies)
 
 		_, ie = mrh.mr.UpsertMsg(300*time.Millisecond, pojo)
 
@@ -118,7 +119,7 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 
 		lg.Trace().Msg("upsert msg completed, publishing to engine server")
 
-		fpd := msgpd.ReceivePd2forwardPd(&msgPd, msgBody)
+		fpd := msgpd.ReceivePd2forwardPd(&msgPd, msg, tsMills)
 		data, _ := json.Fmt(fpd)
 
 		// upsert成功
@@ -144,7 +145,7 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 	return nil
 }
 
-func (mrh *msgReceiveHandler) msgPd2pojo(msgPd msgpd.MsgSendReceivePayload, bodies []byte) (*msgpojo.Msg, error) {
+func (mrh *msgReceiveHandler) msgPd2pojo(msgPd msgpd.MsgSendReceivePayload, bodies []byte) (*msgpojo.Msg, int64, error) {
 	var (
 		now      = time.Now()
 		tsMills  = now.UnixMilli()
@@ -172,5 +173,5 @@ func (mrh *msgReceiveHandler) msgPd2pojo(msgPd msgpd.MsgSendReceivePayload, bodi
 		Uts:       tsMills,
 	}
 
-	return pojo, nil
+	return pojo, tsMills, nil
 }

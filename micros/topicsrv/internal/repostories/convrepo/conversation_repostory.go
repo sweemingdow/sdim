@@ -6,6 +6,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
+	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
+	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel/chatpojo"
@@ -15,15 +17,17 @@ import (
 
 type (
 	Conv struct {
-		ConvId    string
-		MsgSeq    int64 // 会话全局序列号
-		LastMsgId int64 // 最后一条消息id
-		ConvType  int8  // 会话类型
-		Cts       int64
-		Items     []*ConvItem
+		ConvId       string
+		MsgSeq       int64 // 会话全局序列号
+		LastMsgId    int64 // 最后一条消息id
+		LastActiveTs int64
+		ConvType     int8 // 会话类型
+		Cts          int64
+		Items        []*ConvItem
 	}
 
 	ConvItem struct {
+		ConvId       string
 		OwnerUid     string // 会话的所有者
 		RelationId   string // 会话的关联者
 		ConvType     int8
@@ -51,6 +55,7 @@ const (
 	LastMsgIdKey       = "last_msg_id"
 	LastActiveTs       = "last_active_ts"
 	MsgSeqKey          = "msg_seq"
+	UserBrowseMsgSeq   = "user_browse_msg_seq"
 )
 
 /*
@@ -67,11 +72,18 @@ type (
 	ConvRepository interface {
 		FindConvItems(ctx context.Context, convId string) (*Conv, error)
 
+		// 获取用户的所有会话
+		FindUserConvItems(ctx context.Context, uid string) ([]*ConvItem, error)
+
 		UpsertConv(ctx context.Context, conv *Conv) error
 
 		ModifyConvTree(ctx context.Context, sender, convId string, msgId int64) (int64, int64, error)
 
 		GetConvTree(ctx context.Context, convId string, uids []string) (map[string]string, error)
+
+		GetConvTreeWithP2p(ctx context.Context, convId string) (map[string]string, error)
+
+		GetConvTreesWithP2p(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error)
 	}
 
 	convRepository struct {
@@ -91,10 +103,41 @@ func NewConvRepository(rc *credis.RedisClient, sc *csql.SqlClient) ConvRepositor
 	}
 }
 
+func TransferConvTree(convTree map[string]string) (int64, int64, int64, int64) {
+	var (
+		msgSeq       int64
+		lastMsgId    int64
+		lastActiveTs int64
+		browseSeq    int64
+	)
+
+	val, ok := convTree[MsgSeqKey]
+	if ok {
+		msgSeq = utils.MustParseI64(val)
+	}
+
+	val, ok = convTree[LastMsgIdKey]
+	if ok {
+		lastMsgId = utils.MustParseI64(val)
+	}
+
+	val, ok = convTree[LastActiveTs]
+	if ok {
+		lastMsgId = utils.MustParseI64(val)
+	}
+
+	val, ok = convTree[UserBrowseMsgSeq]
+	if ok {
+		lastMsgId = utils.MustParseI64(val)
+	}
+
+	return msgSeq, lastMsgId, lastActiveTs, browseSeq
+}
+
 func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Conv, error) {
 	var items []chatpojo.ConvItem
 	err := cr.sc.WithSess(func(sess *dbr.Session) error {
-		_, err := sess.Select("*").From(chatpojo.ConvItem{}.TableName()).Where("conv_id = ?", convId).Load(&items)
+		_, err := sess.Select("*").From(chatpojo.ConvItem{}.TableName()).Where("conv_id = ?", convId).LoadContext(ctx, &items)
 		return err
 	})
 
@@ -114,6 +157,7 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 	ctsSetting := false
 	for i, item := range items {
 		conv.Items[i] = &ConvItem{
+			ConvId:     item.ConvId,
 			OwnerUid:   item.OwnerUid,
 			RelationId: item.RelationId,
 			ConvType:   item.ConvType,
@@ -147,6 +191,10 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 		return conv, nil
 	}
 
+	lg := mylog.AppLogger()
+
+	lg.Trace().Str("conv_id", convId).Msgf("found convTree, convTree:%+v", convTree)
+
 	if len(convTree) > 0 {
 		if val, ok := convTree[MsgSeqKey]; ok {
 			seq, _ := strconv.ParseInt(val, 10, 64)
@@ -158,6 +206,11 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 			conv.LastMsgId = msgId
 		}
 
+		if val, ok := convTree[LastActiveTs]; ok {
+			lastActiveTs, _ := strconv.ParseInt(val, 10, 64)
+			conv.LastActiveTs = lastActiveTs
+		}
+
 		for _, item := range conv.Items {
 			if val, ok := convTree[PkgBrowseSeqKey(item.OwnerUid)]; ok {
 				seq, _ := strconv.ParseInt(val, 10, 64)
@@ -167,6 +220,44 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 	}
 
 	return conv, nil
+}
+
+func (cr *convRepository) FindUserConvItems(ctx context.Context, uid string) ([]*ConvItem, error) {
+	var pojoItems []chatpojo.ConvItem
+	err := cr.sc.WithSess(func(sess *dbr.Session) error {
+		_, ie := sess.Select("*").
+			From("t_conv_item").
+			Where("owner_uid = ?", uid).
+			LoadContext(ctx, &pojoItems)
+		return ie
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(pojoItems) == 0 {
+		return make([]*ConvItem, 0), nil
+	}
+
+	items := make([]*ConvItem, len(pojoItems))
+	for i, item := range pojoItems {
+		items[i] = &ConvItem{
+			ConvId:     item.ConvId,
+			OwnerUid:   item.OwnerUid,
+			RelationId: item.RelationId,
+			ConvType:   item.ConvType,
+			Title:      item.ConvTitle.String,
+			Icon:       item.ConvIcon.String,
+			Remark:     item.ConvRemark.String,
+			PinTop:     item.PinTop.Int16 == 1,
+			NoDisturb:  item.NoDisturb.Int16 == 1,
+			Cts:        item.Cts,
+			Uts:        item.Uts.Int64,
+		}
+	}
+
+	return items, nil
 }
 
 func (cr *convRepository) UpsertConv(ctx context.Context, conv *Conv) error {
@@ -216,6 +307,7 @@ func (cr *convRepository) UpsertConv(ctx context.Context, conv *Conv) error {
 	convTree := make(map[string]string, 4)
 	convTree[MsgSeqKey] = strconv.FormatInt(conv.MsgSeq, 10)
 	convTree[LastMsgIdKey] = strconv.FormatInt(conv.LastMsgId, 10)
+	convTree[LastActiveTs] = strconv.FormatInt(conv.LastActiveTs, 10)
 
 	for _, item := range conv.Items {
 		convTree[PkgBrowseSeqKey(item.OwnerUid)] = "0"
@@ -299,6 +391,84 @@ func (cr *convRepository) GetConvTree(ctx context.Context, convId string, uids [
 	}
 
 	return rm, nil
+}
+
+func (cr *convRepository) GetConvTreeWithP2p(ctx context.Context, convId string) (map[string]string, error) {
+	var convTree map[string]string
+	err := cr.rc.With(func(cli redis.UniversalClient) error {
+		m, e := cli.HGetAll(ctx, pkgConvTreeKey(convId)).Result()
+		if e != nil {
+			return e
+		}
+
+		convTree = m
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return convTree, nil
+}
+
+func (cr *convRepository) GetConvTreesWithP2p(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error) {
+	var sliceCmds []*redis.SliceCmd
+	err := cr.rc.With(func(cli redis.UniversalClient) error {
+		cmds, ie := cli.Pipelined(ctx, func(pl redis.Pipeliner) error {
+			for _, convId := range convIds {
+				fields := []string{MsgSeqKey, LastMsgIdKey, LastActiveTs, PkgBrowseSeqKey(uid)}
+				fields = append(fields)
+
+				pl.HMGet(ctx, pkgConvTreeKey(convId), fields...)
+			}
+			return nil
+		})
+
+		if ie != nil {
+			return ie
+		}
+
+		sliceCmds = make([]*redis.SliceCmd, len(cmds))
+		for idx, cmd := range cmds {
+			if cmd.Err() != nil {
+				return cmd.Err()
+			}
+
+			sliceCmds[idx] = cmd.(*redis.SliceCmd)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]map[string]string, len(sliceCmds))
+
+	for idx, convId := range convIds {
+		m[convId] = make(map[string]string, 4)
+		sliCmd := sliceCmds[idx]
+		values := sliCmd.Val()
+		if values[0] != nil {
+			m[convId][MsgSeqKey] = values[0].(string)
+		}
+
+		if values[1] != nil {
+			m[convId][LastMsgIdKey] = values[1].(string)
+		}
+
+		if values[2] != nil {
+			m[convId][LastActiveTs] = values[2].(string)
+		}
+
+		if values[3] != nil {
+			m[convId][UserBrowseMsgSeq] = values[3].(string)
+		}
+	}
+
+	return m, nil
 }
 
 func pkgConvTreeKey(convId string) string {

@@ -35,7 +35,7 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 		return nil
 	}
 
-	bodies, err := json.Fmt(msp.MsgBody)
+	bodies, err := json.Fmt(msp.Msg)
 	if err != nil {
 		lg.Error().Stack().Err(err).Msg("parse msg body failed")
 		// give up
@@ -48,7 +48,7 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 		Int64("msg_id", msp.MsgId).
 		Logger()
 
-	lg.Debug().Msgf("receive msg for forward, msgBody:%+v", *msp.MsgBody)
+	lg.Debug().Msgf("receive msg for forward, msgBody:%+v", *msp.Msg)
 
 	uid2conns := mfh.connMgr.GetUsersConns(msp.Members)
 

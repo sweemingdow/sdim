@@ -12,7 +12,7 @@ type ConvItem struct {
 	ConvId       string         `db:"conv_id"`        // 会话id
 	ConvType     int8           `db:"conv_type"`      // 会话类型:[1-单聊,2-群聊,3-客服]
 	OwnerUid     string         `db:"owner_uid"`      // 拥有者uid
-	RelationId   string         `db:"relation_uid"`   // 关联的uid:[单聊=对方uid, 群聊=群id]
+	RelationId   string         `db:"relation_id"`   // 关联的uid:[单聊=对方uid, 群聊=群id]
 	ConvIcon     sql.NullString `db:"conv_icon"`      // 会话icon:[单聊=对方avatar, 群聊=群avatar]
 	ConvTitle    sql.NullString `db:"conv_title"`     // 会话title:[单聊为对方的nickname, 群聊为群名称]
 	ConvRemark   sql.NullString `db:"conv_remark"`    // 会话备注

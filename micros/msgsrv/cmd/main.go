@@ -2,18 +2,22 @@ package main
 
 import (
 	"fmt"
+	"github.com/gofiber/fiber/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/boot"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
 	"github.com/sweemingdow/gmicro_pkg/pkg/decorate/dnacos"
+	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/routebinder"
 	"github.com/sweemingdow/sdim/external/econfig"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/config/msncfg"
-	"github.com/sweemingdow/sdim/micros/msgsrv/internal/mqhandler/msgreceive"
+	"github.com/sweemingdow/sdim/micros/msgsrv/internal/handlers/hmq/msgreceive"
+	"github.com/sweemingdow/sdim/micros/msgsrv/internal/handlers/hrpc"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/repostories/msgrepo"
+	"github.com/sweemingdow/sdim/micros/msgsrv/internal/routers"
 )
 
 func main() {
@@ -28,6 +32,16 @@ func main() {
 	booter.AddComponentStageOption(boot.WithNacosRegistry())
 
 	booter.AddComponentStageOption(boot.WithRpcClientFactory(nil))
+
+	// http服务
+	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
+		lg := mylog.AppLogger()
+		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
+		return c.SendString(err.Error())
+	}))
+
+	// rpc服务
+	booter.AddServerOption(boot.WithRpcServer())
 
 	booter.StartAndServe(func(ac *boot.AppContext) (routebinder.AppRouterBinder, error) {
 		staticCfgVal, ok := ac.GetConfigureReceiver().RecentlyConfigure(dnacos.StaticConfigName)
@@ -69,6 +83,8 @@ func main() {
 			return nil, nil
 		}
 
-		return nil, nil
+		msgHandler := hrpc.NewMsgHandler(mr)
+
+		return routers.NewMsgServerRouterBinder(msgHandler), nil
 	})
 }

@@ -27,27 +27,25 @@ type MsgForwardPayload struct {
 	ConvLastActiveTs int64              `json:"convLastActiveTs,omitempty"`
 	MsgId            int64              `json:"msgId,omitempty"`
 	ClientUniqueId   string             `json:"clientUniqueId,omitempty"` // 客户端唯一id
+	MsgSeq           int64              `json:"msgSeq,omitempty"`
 	ChatType         chatconst.ChatType `json:"chatType,omitempty"`
 	Sender           string             `json:"sender,omitempty"`
+	Receiver         string             `json:"receiver,omitempty"`
 	Members          []string           `json:"members,omitempty"`
 	SendTs           int64              `json:"sendTs,omitempty"`
 	Ttl              int32              `json:"ttl,omitempty"`
-	MsgBody          *StorageMsgBody    `json:"payload,omitempty"`
+	Msg              *Msg               `json:"payload,omitempty"`
+	Cts              int64              `json:"cts,omitempty"`
 }
 
 type (
-	SenderInfo struct {
-		Nickname string `json:"nickname,omitempty"`
-		Avatar   string `json:"avatar,omitempty"`
-	}
-
-	StorageMsgBody struct {
-		SenderInfo SenderInfo           `json:"senderInfo,omitempty"`
+	Msg struct {
+		SenderInfo msgmodel.SenderInfo  `json:"senderInfo,omitempty"`
 		Content    *msgmodel.MsgContent `json:"payload,omitempty"`
 	}
 )
 
-func ReceivePd2forwardPd(rpd *MsgSendReceivePayload, body *StorageMsgBody) *MsgForwardPayload {
+func ReceivePd2forwardPd(rpd *MsgSendReceivePayload, msg *Msg, mills int64) *MsgForwardPayload {
 	return &MsgForwardPayload{
 		ReqId:            rpd.ReqId,
 		ConvId:           rpd.ConvId,
@@ -56,9 +54,12 @@ func ReceivePd2forwardPd(rpd *MsgSendReceivePayload, body *StorageMsgBody) *MsgF
 		ClientUniqueId:   rpd.ClientUniqueId,
 		ChatType:         rpd.ChatType,
 		Sender:           rpd.Sender,
+		Receiver:         rpd.Receiver,
+		MsgSeq:           rpd.MsgSeq,
 		Members:          rpd.Members,
 		SendTs:           rpd.SendTs,
 		Ttl:              rpd.Ttl,
-		MsgBody:          body,
+		Msg:              msg,
+		Cts:              mills,
 	}
 }

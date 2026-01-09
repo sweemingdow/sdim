@@ -4,16 +4,21 @@ go 1.24.10
 
 require (
 	github.com/alphadose/haxmap v1.4.1
+	github.com/dgraph-io/ristretto/v2 v2.3.0
+	github.com/emirpasic/gods v1.18.1
+	github.com/gammazero/deque v1.2.0
 	github.com/gocraft/dbr/v2 v2.7.7
 	github.com/gofiber/fiber/v2 v2.52.10
 	github.com/google/uuid v1.6.0
 	github.com/lesismal/arpc v1.2.17
 	github.com/nsqio/go-nsq v1.1.0
+	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/panjf2000/gnet/v2 v2.9.5
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/rs/zerolog v1.34.0
 	github.com/sweemingdow/delay-queue v0.0.1
 	github.com/sweemingdow/gmicro_pkg v0.0.0-20251206062603-460ce6a67bbb
+	golang.org/x/sync v0.18.0
 )
 
 require (
@@ -47,7 +52,6 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/deckarep/golang-set v1.7.1 // indirect
-	github.com/dgraph-io/ristretto/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
@@ -65,7 +69,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.5 // indirect
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
-	github.com/panjf2000/ants/v2 v2.11.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.12.2 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
@@ -81,7 +84,6 @@ require (
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20221031165847-c99f073a8326 // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.1.0 // indirect

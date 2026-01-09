@@ -2,16 +2,22 @@ package main
 
 import (
 	"fmt"
+	"github.com/gofiber/fiber/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/boot"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
 	"github.com/sweemingdow/gmicro_pkg/pkg/decorate/dnacos"
+	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/routebinder"
 	"github.com/sweemingdow/sdim/external/econfig"
+	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
+	"github.com/sweemingdow/sdim/external/erpc/rpcmsg"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/config/tsncfg"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/convmgr"
+	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hhttp"
+	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hmq/msgforward"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hrpc"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/convrepo"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/routers"
@@ -29,6 +35,12 @@ func main() {
 	booter.AddComponentStageOption(boot.WithNacosConfig(tsncfg.NewTopicSrvConfigurationReceiver()))
 
 	booter.AddComponentStageOption(boot.WithNacosRegistry())
+
+	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
+		lg := mylog.AppLogger()
+		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
+		return c.SendString(err.Error())
+	}))
 
 	// 启动rpc服务
 	booter.AddServerOption(boot.WithRpcServer())
@@ -52,7 +64,7 @@ func main() {
 		rc := credis.NewRedisClient(econfig.RedisConfigConvert(staticCfg.RedisCfg))
 		ac.CollectLifecycle(credis.RedisLifetimeTag, rc)
 
-		pdCfg, _ := econfig.NsqCfgConvert(staticCfg.NsqCfg)
+		pdCfg, csCfg := econfig.NsqCfgConvert(staticCfg.NsqCfg)
 
 		nsqPd, err := cnsq.NewNsqProducer(pdCfg)
 		if err != nil {
@@ -62,15 +74,30 @@ func main() {
 		ac.CollectLifecycle(cnsq.ProducerLifetimeTag, nsqPd)
 
 		userProvider := rpcuser.NewUserInfoRpcProvider(ac.GetArpcClientFactory())
-
-		topicHandler := hrpc.NewTopicHandler(convmgr.NewConvManager(
+		cm := convmgr.NewConvManager(
 			100,
 			128,
+			100,
 			convrepo.NewConvRepository(rc, sc),
 			nsqPd,
 			userProvider,
-		))
+			rpcmsg.NewMsgProvider(ac.GetArpcClientFactory()),
+		)
 
-		return routers.NewTopicServerRouteBinder(topicHandler), nil
+		nsqFactory := cnsq.NewStaticNsqMsgConsumeFactory()
+		nsqFactory.Register(nsqconst.MsgForwardTopic, msgforward.NewMsgForwardHandler(cm))
+
+		nsdCs, err := cnsq.NewNsqConsumer(csCfg, nsqFactory)
+		if err != nil {
+			return nil, err
+		}
+
+		ac.CollectLifecycle(cnsq.ConsumerLifetimeTag, nsdCs)
+
+		topicHandler := hrpc.NewTopicHandler(cm)
+
+		convHttpHandler := hhttp.NewConvHttpHandler(cm)
+
+		return routers.NewTopicServerRouteBinder(topicHandler, convHttpHandler), nil
 	})
 }

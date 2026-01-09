@@ -11,6 +11,8 @@ import (
 type (
 	MsgRepository interface {
 		UpsertMsg(timeout time.Duration, pojo *msgpojo.Msg) (int64, error)
+
+		FindConvMsgs(ctx context.Context, convId string, lastMsgId int64, limit uint8) ([]*msgpojo.Msg, error)
 	}
 
 	msgRepository struct {
@@ -60,4 +62,24 @@ func (mr *msgRepository) UpsertMsg(timeout time.Duration, pojo *msgpojo.Msg) (in
 	}
 
 	return rows, nil
+}
+
+func (mr *msgRepository) FindConvMsgs(ctx context.Context, convId string, lastMsgId int64, limit uint8) ([]*msgpojo.Msg, error) {
+	var pojos []*msgpojo.Msg
+	err := mr.sc.WithSess(func(sess *dbr.Session) error {
+		_, ie := sess.Select("*").
+			From("t_msg").
+			Where("conv_id = ? and id < ?", convId, lastMsgId).
+			OrderDesc("id").
+			Limit(uint64(limit)).
+			LoadContext(ctx, &pojos)
+
+		return ie
+	})
+
+	if err != nil {
+		return make([]*msgpojo.Msg, 0), err
+	}
+
+	return pojos, nil
 }
