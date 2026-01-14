@@ -86,7 +86,7 @@ type ConnManager interface {
 	ModifyAfterAuthed(pa ConnModifyParam) []ConnHandleItem
 
 	// 连接是否认证过
-	ConnHadAuthed(connId string) bool
+	ConnHadAuthed(connId string) (bool, bool)
 
 	// gnet.EventHandler回调时调用
 	CleanAfterConnClosed(connId string)

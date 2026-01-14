@@ -128,7 +128,12 @@ func (cde *connDriveEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	}
 
 	// 连接是否认证
-	connAuthed := cde.connMgr.ConnHadAuthed(ccCtx.Id)
+	connAuthed, exists := cde.connMgr.ConnHadAuthed(ccCtx.Id)
+	if !exists {
+		// 连接都不存在, 直接关闭
+		lg.Warn().Stack().Msg("connection not exists, close it directly")
+		return gnet.Close
+	}
 
 	// 异步批量处理
 	action = cde.frHandler.Handle(connAuthed, c, frs)

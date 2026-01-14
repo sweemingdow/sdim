@@ -242,10 +242,13 @@ func (cm *connManager) ModifyAfterAuthed(pa core.ConnModifyParam) []core.ConnHan
 	return handleItems
 }
 
-func (cm *connManager) ConnHadAuthed(connId string) bool {
+func (cm *connManager) ConnHadAuthed(connId string) (bool, bool) {
 	conn, ok := cm.connId2conn.Get(connId)
+	if ok {
+		return conn.state.Load() == connStateAuthed, true
+	}
 
-	return ok && conn.state.Load() == connStateAuthed
+	return false, false
 }
 func (cm *connManager) CleanAfterConnClosed(connId string) {
 	conn, ok := cm.connId2conn.GetAndDel(connId)

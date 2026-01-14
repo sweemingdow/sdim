@@ -123,12 +123,12 @@ func TransferConvTree(convTree map[string]string) (int64, int64, int64, int64) {
 
 	val, ok = convTree[LastActiveTs]
 	if ok {
-		lastMsgId = utils.MustParseI64(val)
+		lastActiveTs = utils.MustParseI64(val)
 	}
 
 	val, ok = convTree[UserBrowseMsgSeq]
 	if ok {
-		lastMsgId = utils.MustParseI64(val)
+		browseSeq = utils.MustParseI64(val)
 	}
 
 	return msgSeq, lastMsgId, lastActiveTs, browseSeq

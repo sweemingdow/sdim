@@ -35,13 +35,6 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 		return nil
 	}
 
-	bodies, err := json.Fmt(msp.Msg)
-	if err != nil {
-		lg.Error().Stack().Err(err).Msg("parse msg body failed")
-		// give up
-		return nil
-	}
-
 	lg = lg.With().
 		Str("req_id", msp.ReqId).
 		Str("conv_id", msp.ConvId).
@@ -53,8 +46,31 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 	uid2conns := mfh.connMgr.GetUsersConns(msp.Members)
 
 	for _, mebUid := range msp.Members {
+		msg := msp.Msg
+		ffb := fcodec.ForwardFrameBody{
+			ConvId:           msp.ConvId,
+			ConvLastActiveTs: msp.ConvLastActiveTs,
+			MsgId:            msp.MsgId,
+			ClientUniqueId:   msp.ClientUniqueId,
+			MsgSeq:           msp.MsgSeq,
+			ChatType:         msp.ChatType,
+			Sender:           msp.Sender,
+			Receiver:         msp.Receiver,
+			ToUid:            mebUid,
+			SendTs:           msp.SendTs,
+			MsgContent:       msg.Content,
+			SenderInfo:       msg.SenderInfo,
+		}
+
+		bodies, err := json.Fmt(ffb)
+		if err != nil {
+			lg.Error().Str("uid", mebUid).Stack().Err(err).Msg("format forward frame body failed")
+			continue
+		}
+
 		if conns, ok := uid2conns[mebUid]; ok {
 			lg.Trace().Str("uid", mebUid).Msgf("forwarding msg, connSize:%d", len(conns))
+
 			for _, conn := range conns {
 				fr, _ := fcodec.NewForwardFrame(msp.ReqId, bodies)
 

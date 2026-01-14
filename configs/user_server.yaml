@@ -10,8 +10,8 @@ nacos-config:
   username: sdim_dev_a
   password: 123456ff
   log-level: debug
-  log-dir: ./.nacos/log
-  cache-dir: ./.nacos/cache
+  log-dir: ./.nacos/user_server/log
+  cache-dir: ./.nacos/user_server/cache
 
 nacos-center-config:
   # 配置中心

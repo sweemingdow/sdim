@@ -2,14 +2,17 @@ package main
 
 import (
 	"fmt"
+	"github.com/gofiber/fiber/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/boot"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
 	"github.com/sweemingdow/gmicro_pkg/pkg/decorate/dnacos"
+	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/routebinder"
 	"github.com/sweemingdow/sdim/external/econfig"
 	usncfg2 "github.com/sweemingdow/sdim/micros/usersrv/internal/config/usncfg"
+	"github.com/sweemingdow/sdim/micros/usersrv/internal/handlers/hhttp"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/handlers/hrpc"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/repostories/inforepo"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/routers"
@@ -28,6 +31,12 @@ func main() {
 	booter.AddComponentStageOption(boot.WithNacosRegistry())
 
 	booter.AddServerOption(boot.WithRpcServer())
+
+	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
+		lg := mylog.AppLogger()
+		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
+		return c.SendString(err.Error())
+	}))
 
 	booter.StartAndServe(func(ac *boot.AppContext) (routebinder.AppRouterBinder, error) {
 		staticCfgVal, ok := ac.GetConfigureReceiver().RecentlyConfigure(dnacos.StaticConfigName)
@@ -55,9 +64,11 @@ func main() {
 
 		ac.CollectLifecycle(cnsq.ProducerLifetimeTag, nsqPd)
 
+		uir := inforepo.NewUserInfoRepository(sc, rc)
+
 		return routers.NewUserServerRouteBinder(
-			hrpc.NewUserInfoHandler(
-				infosrv.NewUserInfoService(
-					inforepo.NewUserInfoRepository(sc, rc)))), nil
+			hrpc.NewUserInfoHandler(infosrv.NewUserInfoService(uir)),
+			hhttp.NewUserProfileHandler(uir),
+		), nil
 	})
 }

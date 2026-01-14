@@ -7,6 +7,7 @@ import (
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/msgpd"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
 	"github.com/sweemingdow/sdim/external/erpc/rpctopic"
+	"time"
 )
 
 type MsgComingParam struct {
@@ -23,6 +24,7 @@ type MsgComingParam struct {
 type MsgComingResult struct {
 	MsgId  int64
 	ConvId string
+	MsgSeq int64
 	Err    error
 }
 
@@ -43,6 +45,8 @@ func MsgComingResultTo(mcr MsgComingResult, clientUniqueId string) rpctopic.MsgC
 		MsgId:          mcr.MsgId,
 		ClientUniqueId: clientUniqueId,
 		ConvId:         mcr.ConvId,
+		MsgSeq:         mcr.MsgSeq,
+		SendTs:         time.Now().UnixMilli(),
 	}
 }
 

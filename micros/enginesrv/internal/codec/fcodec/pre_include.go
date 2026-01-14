@@ -44,6 +44,28 @@ type (
 		ClientUniqueId string `json:"clientUniqueId,omitempty"` // 客户端唯一id
 		MsgId          int64  `json:"msgId,omitempty"`          // 消息id
 		ConvId         string `json:"convId,omitempty"`         // 会话id
+		MsgSeq         int64  `json:"msgSeq,omitempty"`         // 消息序列号
+		SendTs         int64  `json:"sendTs,omitempty"`         // 服务器时间戳
+	}
+)
+
+type (
+	ForwardFrameBody struct {
+		ConvId           string               `json:"convId,omitempty"`
+		ConvLastActiveTs int64                `json:"convLastActiveTs,omitempty"`
+		MsgId            int64                `json:"msgId,omitempty"`
+		ClientUniqueId   string               `json:"clientUniqueId,omitempty"` // 客户端唯一id
+		MsgSeq           int64                `json:"msgSeq,omitempty"`
+		ChatType         chatconst.ChatType   `json:"chatType,omitempty"`
+		Sender           string               `json:"sender,omitempty"`
+		Receiver         string               `json:"receiver,omitempty"`
+		ToUid            string               `json:"toUid,omitempty"`
+		SendTs           int64                `json:"sendTs,omitempty"`
+		MsgContent       *msgmodel.MsgContent `json:"msgContent,omitempty"`
+		SenderInfo       msgmodel.SenderInfo  `json:"senderInfo,omitempty"`
+	}
+
+	ForwardFrameAckBody struct {
 	}
 )
 

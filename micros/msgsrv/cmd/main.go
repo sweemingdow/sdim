@@ -14,6 +14,7 @@ import (
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/config/msncfg"
+	"github.com/sweemingdow/sdim/micros/msgsrv/internal/handlers/hhttp"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/handlers/hmq/msgreceive"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/handlers/hrpc"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/repostories/msgrepo"
@@ -84,7 +85,8 @@ func main() {
 		}
 
 		msgHandler := hrpc.NewMsgHandler(mr)
+		historyMsgHandler := hhttp.NewHistoryMsgHandler(mr)
 
-		return routers.NewMsgServerRouterBinder(msgHandler), nil
+		return routers.NewMsgServerRouterBinder(msgHandler, historyMsgHandler), nil
 	})
 }

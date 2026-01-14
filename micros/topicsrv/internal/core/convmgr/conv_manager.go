@@ -113,10 +113,13 @@ func (cm *convManager) OnMsgComing(pa core.MsgComingParam) core.MsgComingResult 
 	convType := chatconst.GetConvTypeWithChatType(pa.ChatType)
 	if pa.IsConvType {
 		if convType == chatconst.P2pConv { // 单聊
-			if err := cm.p2pConvHandle(convId, mcr.MsgId, convType, pa); err != nil {
+			msgSeq, err := cm.p2pConvHandle(convId, mcr.MsgId, convType, pa)
+			if err != nil {
 				mcr.Err = err
 				return mcr
 			}
+
+			mcr.MsgSeq = msgSeq
 		}
 	} else { // Danmaku
 
@@ -379,7 +382,7 @@ func (cm *convManager) convList(uid string, msgs bool) ([]*core.ConvListItem, bo
 	return returnItems, true
 }
 
-func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatconst.ConvType, pa core.MsgComingParam) error {
+func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatconst.ConvType, pa core.MsgComingParam) (int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Second)
 	defer cancel()
 
@@ -472,7 +475,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 		})
 
 	if convErr != nil {
-		return convErr
+		return 0, convErr
 	}
 
 	chr := chrVal.(convHandleResult)
@@ -560,7 +563,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 	seq, lastTs, err := cm.cr.ModifyConvTree(ctx, pa.Sender, convId, msgId)
 
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// exclude self
@@ -569,7 +572,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 	})
 
 	if !ok {
-		return errors.New("can not found receiver in conv:" + convId)
+		return 0, errors.New("can not found receiver in conv:" + convId)
 	}
 
 	err = cm.sendMsgWithMq(&msgpd.MsgSendReceivePayload{
@@ -588,10 +591,10 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 	})
 
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return seq, nil
 }
 
 func (cm *convManager) sendMsgWithMq(pd *msgpd.MsgSendReceivePayload) error {

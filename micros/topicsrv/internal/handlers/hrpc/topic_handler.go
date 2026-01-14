@@ -62,7 +62,7 @@ func (th *TopicHandler) HandleMsgComing(c *arpc.Context) {
 		plg := rpccall.LoggerWrapWithReq(req, lg)
 		plg.Error().Stack().Err(rst.Err).Msg("msg coming handle failed")
 
-		var resp = rpccall.SimpleErrDesc(rst.Err.Error())
+		var resp = rpccall.ErrGeneral(rst.Err.Error(), core.MsgComingResultTo(rst, param.ClientUniqueId))
 		srpc.WriteLoggedIfError(c, resp)
 	} else {
 		var resp = rpccall.Ok(core.MsgComingResultTo(rst, param.ClientUniqueId))

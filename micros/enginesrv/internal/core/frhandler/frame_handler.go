@@ -53,7 +53,7 @@ func (fh *asyncFrameHandler) Handle(connAuthed bool, c gnet.Conn, frs []fcodec.F
 	// 未认证连接：只处理单个 Conn 帧
 	if !connAuthed {
 		if len(frs) != 1 || frs[0].Header.Ftype != fcodec.Conn {
-			lg.Warn().Msg("unauthenticated conn sent invalid frames, will be close")
+			lg.Warn().Int("frs_len", len(frs)).Str("frame_type", fcodec.GetFrameTypeDesc(frs[0].Header.Ftype)).Msg("unauthenticated conn sent invalid frames, will be close")
 			return gnet.Close
 		}
 
@@ -205,13 +205,16 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 
 				lg.Debug().Msgf("msg coming return resp:%+v", r)
 
+				data := resp.Data
 				fh.writeSendAckFrame(
 					fcodec.SendFrameAck{
 						ErrCode: fcodec.OK,
 						Data: fcodec.SendFrameAckBody{
-							MsgId:          resp.Resp.MsgId,
-							ClientUniqueId: resp.Resp.ClientUniqueId,
-							ConvId:         resp.Resp.ConvId,
+							MsgId:          data.MsgId,
+							ClientUniqueId: data.ClientUniqueId,
+							ConvId:         data.ConvId,
+							MsgSeq:         data.MsgSeq,
+							SendTs:         data.SendTs,
 						},
 					},
 					fr,
@@ -327,6 +330,23 @@ func (fh *asyncFrameHandler) handleConnFrame(connId string, connFr fcodec.Frame,
 
 	// rpc验证用户
 	resp, err := fh.userInfoProvider.UserState(req)
+
+	lg = lg.With().Str("uid", cf.Uid).Logger()
+
+	if err != nil {
+		lg.Error().Stack().Err(err).Msg("user state rpc failed")
+		caf := fcodec.ConnAckFrame{
+			ErrCode:  fcodec.ServerErr,
+			ErrDesc:  err.Error(),
+			TimeDiff: sn - cf.TsMills,
+		}
+
+		fh.writeConnAckFrame(caf, connFr, c, lg)
+
+		return
+	}
+
+	lg.Trace().Any("resp", resp).Msg("user state rpc success")
 
 	state, err := resp.OkOrErr()
 	if err != nil {
