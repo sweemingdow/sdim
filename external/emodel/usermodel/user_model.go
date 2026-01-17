@@ -12,3 +12,9 @@ const (
 func (us UserState) IsOk() bool {
 	return us == Normal
 }
+
+type UserUnitInfo struct {
+	Uid      string `json:"uid,omitempty"`
+	Nickname string `json:"nickname,omitempty"`
+	Avatar   string `json:"avatar,omitempty"`
+}

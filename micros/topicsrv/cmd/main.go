@@ -20,6 +20,7 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hmq/msgforward"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hrpc"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/convrepo"
+	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/routers"
 )
 
@@ -98,6 +99,14 @@ func main() {
 
 		convHttpHandler := hhttp.NewConvHttpHandler(cm)
 
-		return routers.NewTopicServerRouteBinder(topicHandler, convHttpHandler), nil
+		groupRepo := grouprepo.NewGroupRepository(sc, rc)
+
+		groupHttpHandler := hhttp.NewGroupHttpHandler(cm, groupRepo, userProvider)
+
+		return routers.NewTopicServerRouteBinder(
+			topicHandler,
+			convHttpHandler,
+			groupHttpHandler,
+		), nil
 	})
 }

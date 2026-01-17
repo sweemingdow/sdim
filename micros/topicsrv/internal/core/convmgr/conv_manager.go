@@ -110,7 +110,7 @@ func (cm *convManager) OnMsgComing(pa core.MsgComingParam) core.MsgComingResult 
 		}
 	}
 
-	convId := generateConvId(pa)
+	convId := generateP2pConvId(pa)
 	var mcr = core.MsgComingResult{
 		MsgId:  sfid.Next(),
 		ConvId: convId,
@@ -973,23 +973,12 @@ func (cm *convManager) receiveMqSendAsyncResult() {
 	}
 }
 
-func generateConvId(pa core.MsgComingParam) string {
-	convType := chatconst.GetConvTypeWithChatType(pa.ChatType)
-	if convType == chatconst.P2pConv {
-		if pa.Sender <= pa.Receiver {
-			return fmt.Sprintf("p2p:%s:%s", pa.Sender, pa.Receiver)
-		}
-
-		return fmt.Sprintf("p2p:%s:%s", pa.Receiver, pa.Sender)
-	} else if convType == chatconst.GroupConv {
-		return "grp:" + pa.Receiver
-	} else if convType == chatconst.CustomerConv {
-		return "cus:" + pa.Receiver
-	} else if pa.ChatType == chatconst.Danmaku {
-
+func generateP2pConvId(pa core.MsgComingParam) string {
+	if pa.Sender <= pa.Receiver {
+		return fmt.Sprintf("p2p:%s:%s", pa.Sender, pa.Receiver)
 	}
 
-	return ""
+	return fmt.Sprintf("p2p:%s:%s", pa.Receiver, pa.Sender)
 }
 
 /*

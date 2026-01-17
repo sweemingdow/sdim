@@ -226,49 +226,6 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 		}
 	}
 
-	/*var convTree map[string]string
-	err = cr.rc.With(func(cli redis.UniversalClient) error {
-		m, e := cli.HGetAll(ctx, pkgConvTreeKey(convId)).Result()
-		if e != nil {
-			return e
-		}
-
-		convTree = m
-		return nil
-	})
-
-	if err != nil {
-		return conv, nil
-	}
-
-	lg := mylog.AppLogger()
-
-	lg.Trace().Str("conv_id", convId).Msgf("found convTree, convTree:%+v", convTree)
-
-	if len(convTree) > 0 {
-		if val, ok := convTree[MsgSeqKey]; ok {
-			seq, _ := strconv.ParseInt(val, 10, 64)
-			conv.MsgSeq = seq
-		}
-
-		if val, ok := convTree[LastMsgIdKey]; ok {
-			msgId, _ := strconv.ParseInt(val, 10, 64)
-			conv.LastMsgId = msgId
-		}
-
-		if val, ok := convTree[LastActiveTs]; ok {
-			lastActiveTs, _ := strconv.ParseInt(val, 10, 64)
-			conv.LastActiveTs = lastActiveTs
-		}
-
-		for _, item := range conv.Items {
-			if val, ok := convTree[PkgBrowseSeqKey(item.OwnerUid)]; ok {
-				seq, _ := strconv.ParseInt(val, 10, 64)
-				item.BrowseMsgSeq = seq
-			}
-		}
-	}*/
-
 	return conv, nil
 }
 
