@@ -69,6 +69,14 @@ type (
 	}
 )
 
+type (
+	ConvUpdateFrame struct {
+		ConvId string         `json:"convId"`
+		Type   string         `json:"type"` // 会话更新类型
+		Data   map[string]any `json:"data"` // 携带的数据
+	}
+)
+
 const (
 	OK         ErrCode = 0
 	BizErr             = 1000

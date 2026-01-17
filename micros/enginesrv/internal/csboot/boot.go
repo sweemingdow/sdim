@@ -12,6 +12,8 @@ import (
 	"github.com/sweemingdow/sdim/micros/enginesrv/internal/config/esncfg"
 	"github.com/sweemingdow/sdim/micros/enginesrv/internal/core/connmgr"
 	"github.com/sweemingdow/sdim/micros/enginesrv/internal/core/frhandler"
+	"github.com/sweemingdow/sdim/micros/enginesrv/internal/core/mqhandler/convadd"
+	"github.com/sweemingdow/sdim/micros/enginesrv/internal/core/mqhandler/convupdate"
 	"github.com/sweemingdow/sdim/micros/enginesrv/internal/core/mqhandler/msgforward"
 	"github.com/sweemingdow/sdim/micros/enginesrv/internal/drive"
 )
@@ -41,6 +43,8 @@ func StartConnDriveEngine(ac *boot.AppContext, sc esncfg.StaticConfig) {
 
 	nsqFactory := cnsq.NewStaticNsqMsgConsumeFactory()
 	nsqFactory.Register(nsqconst.MsgForwardTopic, msgforward.NewMsgForwardHandler(cm, frCodec))
+	nsqFactory.Register(nsqconst.ConvUpdateTopic, convupdate.NewConvUpdateHandler(cm, frCodec))
+	nsqFactory.Register(nsqconst.ConvAddTopic, convadd.NewConvAddHandler(cm, frCodec))
 
 	nsdCs, err := cnsq.NewNsqConsumer(csCfg, nsqFactory)
 	if err != nil {

@@ -48,5 +48,22 @@ func (chh *ConvHttpHandler) convList(c *fiber.Ctx, listFunc func(uid string) []*
 
 // 清除会话未读数
 func (chh *ConvHttpHandler) HandleClearUnreadCount(c *fiber.Ctx) error {
-	return nil
+	convId := c.Query("conv_id")
+	if convId == "" {
+		return fmt.Errorf("convId is required")
+	}
+
+	uid := c.Query("uid")
+
+	if uid == "" {
+		return fmt.Errorf("uid is required")
+	}
+
+	err := chh.cm.ClearUnread(convId, uid)
+	if err != nil {
+		return err
+	}
+
+	bodies, _ := json.Fmt(wrapper.JustOk())
+	return c.Send(bodies)
 }

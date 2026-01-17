@@ -85,7 +85,7 @@ func main() {
 		)
 
 		nsqFactory := cnsq.NewStaticNsqMsgConsumeFactory()
-		nsqFactory.Register(nsqconst.MsgForwardTopic, msgforward.NewMsgForwardHandler(cm))
+		nsqFactory.Register(nsqconst.MsgForwardTopic, msgforward.NewMsgForwardHandler(cm, nsqPd))
 
 		nsdCs, err := cnsq.NewNsqConsumer(csCfg, nsqFactory)
 		if err != nil {

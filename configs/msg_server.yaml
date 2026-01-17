@@ -27,7 +27,7 @@ nacos-center-config:
   registry-discover:
     cluster-name: ""
     group-name: SDIM_RD
-    discover-dial-timeout-mills: 2000
+    discover-dial-timeout: 2s
 
 log-config:
   level: trace

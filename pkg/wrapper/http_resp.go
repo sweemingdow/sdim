@@ -21,6 +21,27 @@ func RespOk[T any](data T) HttpRespWrapper[T] {
 	}
 }
 
+func JustOk() HttpRespWrapper[any] {
+	return HttpRespWrapper[any]{
+		Code: Ok,
+	}
+}
+
+func JustGeneralErr() HttpRespWrapper[any] {
+	return HttpRespWrapper[any]{
+		Code: GeneralErr,
+	}
+}
+
+func RespGeneralErrAll[T any](code, subCode, msg string, data T) HttpRespWrapper[T] {
+	return HttpRespWrapper[T]{
+		Code:    GeneralErr,
+		SubCode: subCode,
+		Msg:     msg,
+		Data:    data,
+	}
+}
+
 func (hrw HttpRespWrapper[T]) IsOK() bool {
 	return hrw.Code == Ok
 }

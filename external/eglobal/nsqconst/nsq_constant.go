@@ -5,4 +5,8 @@ const (
 
 	// 消息接收主题
 	MsgReceiveTopic = "topic.msg_receive"
+
+	ConvUpdateTopic = "topic.conv_update"
+
+	ConvAddTopic = "topic.conv_add"
 )

@@ -10,6 +10,6 @@ func ConfigConvRouter(fa *fiber.App, handler *hhttp.ConvHttpHandler) {
 	convGrp.
 		Get("/recently_list", handler.HandleRecentlyConvList).
 		Get("/sync/hot_list", handler.HandleSyncHotConvList).
-		Post("/clear_unread_count", handler.HandleClearUnreadCount)
+		Post("/clear_unread", handler.HandleClearUnreadCount)
 
 }

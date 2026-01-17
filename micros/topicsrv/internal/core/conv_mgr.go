@@ -50,21 +50,15 @@ func MsgComingResultTo(mcr MsgComingResult, clientUniqueId string) rpctopic.MsgC
 	}
 }
 
-type LastMsgInConv struct {
-	MsgId      int64                `json:"msgId"`
-	SenderInfo msgmodel.SenderInfo  `json:"senderInfo"`
-	Content    *msgmodel.MsgContent `json:"content"`
-}
-
 type (
 	Conversation struct {
 		Id           string             // 会话id
 		Type         chatconst.ConvType // 会话类型
 		LastActiveTs int64
-		Members      []string // 会话的所有成员(包含自己)
-		MsgSeq       int64    // 会话内的全局递增消息序列号
+		Members      map[string]struct{} // 会话的所有成员(包含自己)
+		MsgSeq       int64               // 会话内的全局递增消息序列号
 		LastMsgId    int64
-		LastMsg      *LastMsgInConv                       // 维护会话的最近1条实时消息
+		LastMsg      *msgmodel.LastMsg                    // 维护会话的最近1条实时消
 		RecentlyMsgs *deque.Deque[*msgmodel.MsgItemInMem] // 会话的最近n条消息
 	}
 
@@ -101,12 +95,18 @@ type ConvListItem struct {
 	PinTop       bool                     `json:"pinTop"`
 	NoDisturb    bool                     `json:"noDisturb"`
 	MsgSeq       int64                    `json:"msgSeq"`
-	LastMsg      *LastMsgInConv           `json:"lastMsg"`
+	LastMsg      *msgmodel.LastMsg        `json:"lastMsg"`
 	BrowseMsgSeq int64                    `json:"browseMsgSeq"`
 	UnreadCount  int64                    `json:"unreadCount"`
 	Cts          int64                    `json:"cts"`
 	Uts          int64                    `json:"uts"`
 	RecentlyMsgs []*msgmodel.MsgItemInMem `json:"recentlyMsgs"`
+}
+
+type MsgStoredResult struct {
+	LastMsg         *msgmodel.LastMsg
+	Uid2UnreadCount map[string]int64
+	LastActiveTs    int64
 }
 
 // 会话管理器
@@ -115,11 +115,13 @@ type ConvManager interface {
 
 	OnMsgComing(pa MsgComingParam) MsgComingResult
 
-	OnMsgStored(pd *msgpd.MsgForwardPayload)
+	OnMsgStored(pd *msgpd.MsgForwardPayload) MsgStoredResult
 
 	// 获取用户最近会话列表(只获取列表, 不包含消息)
 	RecentlyConvList(uid string) []*ConvListItem
 
 	// 同步用户最近会话列表, 包含每条会话的最近N条消息
 	SyncHotConvList(uid string) []*ConvListItem
+
+	ClearUnread(convId, uid string) error
 }

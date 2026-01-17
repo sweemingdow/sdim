@@ -35,6 +35,12 @@ type MsgContent struct {
 	Extra   map[string]any `json:"extra"`   // extra内容
 }
 
+type LastMsg struct {
+	MsgId      int64       `json:"msgId"`
+	SenderInfo SenderInfo  `json:"senderInfo"`
+	Content    *MsgContent `json:"content"`
+}
+
 func ValidateMsgContent(mc *MsgContent) error {
 	return nil
 }

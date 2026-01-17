@@ -6,7 +6,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
-	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
@@ -23,7 +22,7 @@ type (
 		LastActiveTs int64
 		ConvType     int8 // 会话类型
 		Cts          int64
-		Items        []*ConvItem
+		Items        []*ConvItem // upsert时用
 	}
 
 	ConvItem struct {
@@ -46,6 +45,13 @@ const convTreeLuaScript = `
 local hk = KEYS[1]
 local seq = redis.call('HINCRBY', hk, 'msg_seq', 1)
 redis.call('HMSET', hk, ARGV[1], seq, 'last_msg_id', ARGV[2], 'last_active_ts', ARGV[3])
+return seq
+`
+
+const clearUnreadLuaScript = `
+local hk = KEYS[1]
+local seq = redis.call('HGET', hk, 'msg_seq')
+redis.call('HSET', hk, ARGV[1], seq)
 return seq
 `
 
@@ -72,6 +78,10 @@ type (
 	ConvRepository interface {
 		FindConvItems(ctx context.Context, convId string) (*Conv, error)
 
+		FindConv(ctx context.Context, convId string) (*Conv, error)
+
+		FindConvOneItem(ctx context.Context, convId, uid string) (*ConvItem, error)
+
 		// 获取用户的所有会话
 		FindUserConvItems(ctx context.Context, uid string) ([]*ConvItem, error)
 
@@ -84,6 +94,9 @@ type (
 		GetConvTreeWithP2p(ctx context.Context, convId string) (map[string]string, error)
 
 		GetConvTreesWithP2p(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error)
+
+		// 清除未读
+		ClearUnread(ctx context.Context, convId, uid string) (int64, error)
 	}
 
 	convRepository struct {
@@ -92,18 +105,21 @@ type (
 		sc *csql.SqlClient
 
 		ctScript *redis.Script
+
+		clearUnreadScript *redis.Script
 	}
 )
 
 func NewConvRepository(rc *credis.RedisClient, sc *csql.SqlClient) ConvRepository {
 	return &convRepository{
-		rc:       rc,
-		sc:       sc,
-		ctScript: redis.NewScript(convTreeLuaScript),
+		rc:                rc,
+		sc:                sc,
+		ctScript:          redis.NewScript(convTreeLuaScript),
+		clearUnreadScript: redis.NewScript(clearUnreadLuaScript),
 	}
 }
 
-func TransferConvTree(convTree map[string]string) (int64, int64, int64, int64) {
+func TransferConvTreeForBatch(convTree map[string]string) (int64, int64, int64, int64) {
 	var (
 		msgSeq       int64
 		lastMsgId    int64
@@ -132,6 +148,40 @@ func TransferConvTree(convTree map[string]string) (int64, int64, int64, int64) {
 	}
 
 	return msgSeq, lastMsgId, lastActiveTs, browseSeq
+}
+
+func TransferConvTreeForOrigin(convTree map[string]string, members []string) (int64, int64, int64, map[string]int64) {
+	var (
+		msgSeq        int64
+		lastMsgId     int64
+		lastActiveTs  int64
+		uid2browseSeq = make(map[string]int64, len(members))
+	)
+
+	val, ok := convTree[MsgSeqKey]
+	if ok {
+		msgSeq = utils.MustParseI64(val)
+	}
+
+	val, ok = convTree[LastMsgIdKey]
+	if ok {
+		lastMsgId = utils.MustParseI64(val)
+	}
+
+	val, ok = convTree[LastActiveTs]
+	if ok {
+		lastActiveTs = utils.MustParseI64(val)
+	}
+
+	for _, mebUid := range members {
+		val, ok = convTree[PkgBrowseSeqKey(mebUid)]
+		if ok {
+			browseSeq := utils.MustParseI64(val)
+			uid2browseSeq[mebUid] = browseSeq
+		}
+	}
+
+	return msgSeq, lastMsgId, lastActiveTs, uid2browseSeq
 }
 
 func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Conv, error) {
@@ -176,7 +226,7 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 		}
 	}
 
-	var convTree map[string]string
+	/*var convTree map[string]string
 	err = cr.rc.With(func(cli redis.UniversalClient) error {
 		m, e := cli.HGetAll(ctx, pkgConvTreeKey(convId)).Result()
 		if e != nil {
@@ -217,9 +267,63 @@ func (cr *convRepository) FindConvItems(ctx context.Context, convId string) (*Co
 				item.BrowseMsgSeq = seq
 			}
 		}
-	}
+	}*/
 
 	return conv, nil
+}
+
+func (cr *convRepository) FindConv(ctx context.Context, convId string) (*Conv, error) {
+	var pojo chatpojo.Conv
+	err := cr.sc.WithSess(func(sess *dbr.Session) error {
+		ie := sess.Select("conv_id, conv_type").
+			From("t_conv").
+			Where("conv_id = ?", convId).
+			LoadOneContext(ctx, &pojo)
+		return ie
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &Conv{
+		ConvId:   convId,
+		ConvType: pojo.ConvType,
+		Items:    make([]*ConvItem, 0),
+	}, nil
+}
+
+func pojoItem2memItem(item *chatpojo.ConvItem) *ConvItem {
+	return &ConvItem{
+		ConvId:     item.ConvId,
+		OwnerUid:   item.OwnerUid,
+		RelationId: item.RelationId,
+		ConvType:   item.ConvType,
+		Title:      item.ConvTitle.String,
+		Icon:       item.ConvIcon.String,
+		Remark:     item.ConvRemark.String,
+		PinTop:     item.PinTop.Int16 == 1,
+		NoDisturb:  item.NoDisturb.Int16 == 1,
+		Cts:        item.Cts,
+		Uts:        item.Uts.Int64,
+	}
+}
+
+func (cr *convRepository) FindConvOneItem(ctx context.Context, convId, uid string) (*ConvItem, error) {
+	var pojo chatpojo.ConvItem
+	err := cr.sc.WithSess(func(sess *dbr.Session) error {
+		ie := sess.Select("*").
+			From("t_conv_item").
+			Where("owner_uid = ?", uid).
+			LoadOneContext(ctx, &pojo)
+		return ie
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return pojoItem2memItem(&pojo), nil
 }
 
 func (cr *convRepository) FindUserConvItems(ctx context.Context, uid string) ([]*ConvItem, error) {
@@ -242,19 +346,7 @@ func (cr *convRepository) FindUserConvItems(ctx context.Context, uid string) ([]
 
 	items := make([]*ConvItem, len(pojoItems))
 	for i, item := range pojoItems {
-		items[i] = &ConvItem{
-			ConvId:     item.ConvId,
-			OwnerUid:   item.OwnerUid,
-			RelationId: item.RelationId,
-			ConvType:   item.ConvType,
-			Title:      item.ConvTitle.String,
-			Icon:       item.ConvIcon.String,
-			Remark:     item.ConvRemark.String,
-			PinTop:     item.PinTop.Int16 == 1,
-			NoDisturb:  item.NoDisturb.Int16 == 1,
-			Cts:        item.Cts,
-			Uts:        item.Uts.Int64,
-		}
+		items[i] = pojoItem2memItem(&item)
 	}
 
 	return items, nil
@@ -469,6 +561,31 @@ func (cr *convRepository) GetConvTreesWithP2p(ctx context.Context, uid string, c
 	}
 
 	return m, nil
+}
+
+func (cr *convRepository) ClearUnread(ctx context.Context, convId, uid string) (int64, error) {
+	var seqVal string
+	err := cr.rc.With(func(cli redis.UniversalClient) error {
+		val, e := cr.clearUnreadScript.Run(
+			ctx,
+			cli,
+			[]string{pkgConvTreeKey(convId)},
+			PkgBrowseSeqKey(uid),
+		).Result()
+
+		if e != nil {
+			return e
+		}
+
+		seqVal = val.(string)
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return strconv.ParseInt(seqVal, 10, 64)
 }
 
 func pkgConvTreeKey(convId string) string {
