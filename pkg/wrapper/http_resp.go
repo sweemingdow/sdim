@@ -3,8 +3,8 @@ package wrapper
 import "github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
 
 const (
-	Ok         = "1"
-	GeneralErr = "0"
+	Ok     = "1"
+	GenErr = "0"
 )
 
 type HttpRespWrapper[T any] struct {
@@ -29,13 +29,20 @@ func JustOk() HttpRespWrapper[any] {
 
 func JustGeneralErr() HttpRespWrapper[any] {
 	return HttpRespWrapper[any]{
-		Code: GeneralErr,
+		Code: GenErr,
+	}
+}
+
+func GeneralErr(err error) HttpRespWrapper[any] {
+	return HttpRespWrapper[any]{
+		Code: GenErr,
+		Msg:  err.Error(),
 	}
 }
 
 func RespGeneralErrAll[T any](code, subCode, msg string, data T) HttpRespWrapper[T] {
 	return HttpRespWrapper[T]{
-		Code:    GeneralErr,
+		Code:    GenErr,
 		SubCode: subCode,
 		Msg:     msg,
 		Data:    data,
@@ -47,7 +54,7 @@ func (hrw HttpRespWrapper[T]) IsOK() bool {
 }
 
 func (hrw HttpRespWrapper[T]) IsGeneralErr() bool {
-	return hrw.Code == GeneralErr
+	return hrw.Code == GenErr
 }
 
 func ParseResp[T any](respBuf []byte, vp *HttpRespWrapper[T]) error {

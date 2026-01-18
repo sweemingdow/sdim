@@ -1,0 +1,51 @@
+app-config:
+  app-name: engine_server
+  profile: dev
+  graceful-exit-timeout-mills: 30000
+
+nacos-config:
+  namespace-id: 586f5a7e-5d1e-4240-8ed0-9bf2b47df831
+  cluster-name: ""
+  addresses: 192.168.1.6:8848
+  username: sdim_dev_a
+  password: 123456ff
+  log-level: debug
+  log-dir: ./.nacos/engine_server/log
+  cache-dir: ./.nacos/engine_server/cache
+
+nacos-center-config:
+  # 配置中心
+  config:
+    cluster-name: ""
+    group-name: ENGINE_SRV
+    static:
+      - name: static-config.yaml
+        group-name:
+    dynamic:
+#      - name: dynamic-config.yaml
+#        group-name:
+  # 注册/发现中心
+  registry-discover:
+    cluster-name: ""
+    group-name: SDIM_RD
+    discover-dial-timeout: 2s
+
+log-config:
+  level: trace
+  file-log-config:
+    file-path: ./.logs
+    max-file-size: 10
+    max-backup: 3
+    history-days: 7
+    compress: true
+  remote-log-config:
+    host: 192.168.1.6
+    port: 5171
+    reconnect-max-delay-mills: 30000
+    queue-size: 200
+    stop-timeout-mills: 5000
+    must-connected-in-init: true
+    batch-timing-mills: 100
+    batch-quantitative-size: 100
+    debug: false
+

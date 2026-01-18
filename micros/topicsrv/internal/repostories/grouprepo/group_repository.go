@@ -5,7 +5,6 @@ import (
 	"github.com/gocraft/dbr/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
-	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/sdim/external/eglobal/chatconst"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
 	"github.com/sweemingdow/sdim/external/emodel/usermodel"
@@ -13,6 +12,7 @@ import (
 )
 
 type CreateGroupChatParam struct {
+	GroupNo     string
 	GroupName   string
 	Avatar      string
 	OwnerUid    string
@@ -38,15 +38,14 @@ func NewGroupRepository(sc *csql.SqlClient, rc *credis.RedisClient) GroupReposit
 
 func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGroupChatParam) (string, error) {
 	cts := time.Now().UnixMilli()
-	grpNo := utils.RandStr(32)
-	convId := chatmodel.GenerateGroupChatConvId(grpNo)
+	convId := chatmodel.GenerateGroupChatConvId(param.GroupNo)
 
 	err := gr.sc.WithTransCtx(
 		ctx,
 		func(_ context.Context, tx *dbr.Tx) error {
 			_, ie := tx.InsertBySql(
 				`insert into t_group (group_no, creator, group_name, group_avatar, limited_num, cts, uts) values(?,?,?,?,?,?,?)`,
-				grpNo,
+				param.GroupNo,
 				param.OwnerUid,
 				param.GroupName,
 				param.Avatar,
@@ -68,7 +67,7 @@ func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGrou
 
 				_, ie = tx.InsertBySql(
 					`insert into t_group_item (group_no, uid, role, meb_avatar, meb_nickname, cts, uts) values(?,?,?,?,?,?,?) on duplicate key update meb_avatar = values(meb_avatar), meb_nickname = values(meb_nickname), uts = values(uts)`,
-					grpNo,
+					param.GroupNo,
 					mebInfo.Uid,
 					role,
 					mebInfo.Avatar,
@@ -100,7 +99,7 @@ func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGrou
 					convId,
 					chatconst.GroupConv,
 					mebInfo.Uid,
-					grpNo,
+					param.GroupNo,
 					mebInfo.Avatar,
 					mebInfo.Nickname,
 					cts,

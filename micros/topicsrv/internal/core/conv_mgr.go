@@ -124,4 +124,7 @@ type ConvManager interface {
 	SyncHotConvList(uid string) []*ConvListItem
 
 	ClearUnread(convId, uid string) error
+
+	// 群聊会话
+	UpsertGroupChatConv(convId, groupNo, icon, title string, members []string) bool
 }

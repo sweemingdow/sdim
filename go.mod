@@ -5,7 +5,6 @@ go 1.24.10
 require (
 	github.com/alphadose/haxmap v1.4.1
 	github.com/dgraph-io/ristretto/v2 v2.3.0
-	github.com/emirpasic/gods v1.18.1
 	github.com/gammazero/deque v1.2.0
 	github.com/gocraft/dbr/v2 v2.7.7
 	github.com/gofiber/fiber/v2 v2.52.10

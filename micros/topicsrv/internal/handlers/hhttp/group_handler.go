@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
+	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
 	"github.com/sweemingdow/sdim/external/emodel/usermodel"
@@ -43,29 +44,37 @@ type StartGroupChatReq struct {
 
 // 发起群聊(创建并加入群聊)
 func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
-	var sgc StartGroupChatReq
-	err := c.BodyParser(&sgc)
+	var req StartGroupChatReq
+	err := c.BodyParser(&req)
 	if err != nil {
 		return err
 	}
 
-	if len(sgc.Members) == 0 {
+	if len(req.Members) == 0 {
 		return errors.New("can not create group without any members")
 	}
 
-	newMebs := usli.Distinct(sgc.Members)
+	newMebs := usli.Distinct(req.Members)
 	if len(newMebs) == 1 {
-		if newMebs[0] == sgc.OwnerUid {
+		if newMebs[0] == req.OwnerUid {
 			return errors.New("can not create group with self")
+		}
+	}
+
+	newMebs = append(newMebs, req.OwnerUid)
+
+	if req.LimitedNum > 0 {
+		if len(newMebs) > req.LimitedNum {
+			return errors.New("group members over limited num")
 		}
 	}
 
 	lg := mylog.AppLogger()
 
-	lg.Debug().Msgf("handle start group chat, req=%+v", sgc)
+	lg.Debug().Msgf("handle start group chat, req=%+v", req)
 
 	// rpc查用户信息
-	rpcResp, err := ghh.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: append([]string{sgc.OwnerUid}, newMebs...)}))
+	rpcResp, err := ghh.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
 	if err != nil {
 		return err
 	}
@@ -89,13 +98,16 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3000*time.Millisecond)
 	defer cancel()
 
-	_, err = ghh.gr.CreateGroupChat(
+	grpNo := utils.RandStr(32)
+
+	convId, err := ghh.gr.CreateGroupChat(
 		ctx,
 		grouprepo.CreateGroupChatParam{
-			GroupName:   sgc.GroupName,
-			Avatar:      sgc.Avatar,
-			OwnerUid:    sgc.OwnerUid,
-			LimitedNum:  sgc.LimitedNum,
+			GroupNo:     grpNo,
+			GroupName:   req.GroupName,
+			Avatar:      req.Avatar,
+			OwnerUid:    req.OwnerUid,
+			LimitedNum:  req.LimitedNum,
 			MembersInfo: mebInfo,
 		})
 
@@ -104,5 +116,9 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	}
 
 	// 同步会话到内存
+	ghh.cm.UpsertGroupChatConv(convId, grpNo, req.Avatar, req.Avatar, req.Members)
+
+	// todo
+
 	return nil
 }

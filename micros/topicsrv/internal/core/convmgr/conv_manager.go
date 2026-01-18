@@ -31,7 +31,7 @@ import (
 )
 
 func init() {
-	sfid.Setting(false)
+	sfid.Setting(true)
 }
 
 type convManager struct {
@@ -354,6 +354,82 @@ func (cm *convManager) ClearUnread(convId, uid string) error {
 		})
 
 	return nil
+}
+
+func (cm *convManager) UpsertGroupChatConv(convId, groupNo, icon, title string, members []string) bool {
+	_, _ = cm.convSegLock.WithLockManual(
+		convId,
+		func(lock *sync.RWMutex) (any, error) {
+			lock.RLock()
+			conv, ok := cm.convId2items[convId]
+			lock.RUnlock()
+
+			if ok {
+				return nil, nil
+			}
+
+			lock.Lock()
+			defer lock.Unlock()
+
+			conv = &core.Conversation{
+				Id:   convId,
+				Type: chatconst.GroupConv,
+				Members: usli.ToMap(
+					members,
+					func(meb string) string {
+						return meb
+					},
+					func(meb string, _ string) struct{} {
+						return struct{}{}
+					}),
+			}
+			cm.convId2items[convId] = conv
+
+			return nil, nil
+		})
+
+	uid2convAdded := make(map[string]bool, len(members))
+	for _, mebUid := range members {
+		addedVal, _ := cm.uidSegLock.WithLockManual(
+			mebUid,
+			func(lock *sync.RWMutex) (any, error) {
+				lock.RLock()
+				convWrap, ok := cm.uid2convItems[mebUid]
+				lock.RUnlock()
+
+				if ok {
+					return false, nil
+				}
+
+				lock.Lock()
+				defer lock.Unlock()
+
+				convWrap = &core.MemberConvWrap{
+					ConvId2Item: make(map[string]*core.MemberConv, 100),
+					ConvItems:   make([]*core.MemberConv, 0, 100),
+				}
+
+				cm.uid2convItems[mebUid] = convWrap
+
+				mebConv := &core.MemberConv{
+					Id:         convId,
+					Type:       chatconst.GroupConv,
+					Icon:       icon,
+					Title:      title,
+					RelationId: groupNo,
+				}
+
+				convWrap.ConvId2Item[convId] = mebConv
+				convWrap.ConvItems = append(convWrap.ConvItems, mebConv)
+
+				return true, nil
+			})
+
+		added := addedVal.(bool)
+		uid2convAdded[mebUid] = added
+	}
+
+	return false
 }
 
 type convListResult struct {
