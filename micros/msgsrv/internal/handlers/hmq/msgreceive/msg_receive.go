@@ -9,6 +9,7 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/msgpd"
+	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel/msgpojo"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
@@ -82,34 +83,44 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 	}
 
 	err = mrh.pool.Submit(func() {
-		resp, ie := mrh.userProvider.UserUnitInfo(rpccall.CreateIdReq(msgPd.ReqId, rpcuser.UserUnitInfoReq{Uid: msgPd.Sender}))
+		var sendInfo msgmodel.SenderInfo
+		if chatmodel.IsUserSend(msgPd.SenderType) {
+			resp, ie := mrh.userProvider.UserUnitInfo(rpccall.CreateIdReq(msgPd.ReqId, rpcuser.UserUnitInfoReq{Uid: msgPd.Sender}))
 
-		if ie != nil {
-			lg.Error().Stack().Err(ie).Msgf("find user with rpc failed, uid:%s", msgPd.Sender)
-			message.Requeue(500 * time.Millisecond)
-			return
-		}
+			if ie != nil {
+				lg.Error().Stack().Err(ie).Msgf("find user with rpc failed, uid:%s", msgPd.Sender)
+				message.Requeue(500 * time.Millisecond)
+				return
+			}
 
-		info, ie := resp.OkOrErr()
-		if ie != nil {
-			lg.Error().Stack().Err(ie).Msgf("find user with rpc response failed, uid:%s", msgPd.Sender)
-			message.Requeue(100 * time.Millisecond)
-			return
+			info, ie := resp.OkOrErr()
+			if ie != nil {
+				lg.Error().Stack().Err(ie).Msgf("find user with rpc response failed, uid:%s", msgPd.Sender)
+				message.Requeue(100 * time.Millisecond)
+				return
+			}
+
+			sendInfo = msgmodel.SenderInfo{
+				SenderType: msgPd.SenderType,
+				Nickname:   info.Nickname,
+				Avatar:     info.Avatar,
+			}
+		} else {
+			sendInfo = msgmodel.SenderInfo{
+				SenderType: msgPd.SenderType,
+			}
 		}
 
 		msg := &msgpd.Msg{
-			SenderInfo: msgmodel.SenderInfo{
-				Nickname: info.Nickname,
-				Avatar:   info.Avatar,
-			},
-			Content: msgPd.MsgContent,
+			SenderInfo: sendInfo,
+			Content:    msgPd.MsgContent,
 		}
 
 		bodies, _ := json.Fmt(msg)
 
 		pojo, tsMills, _ := mrh.msgPd2pojo(msgPd, bodies)
 
-		_, ie = mrh.mr.UpsertMsg(300*time.Millisecond, pojo)
+		_, ie := mrh.mr.UpsertMsg(300*time.Millisecond, pojo)
 
 		if ie != nil {
 			lg.Error().Stack().Err(ie).Msgf("upsert msg failed, msgPayload:%+v", msgPd)
@@ -142,6 +153,7 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 		message.Requeue(500 * time.Millisecond)
 		return err
 	}
+
 	return nil
 }
 

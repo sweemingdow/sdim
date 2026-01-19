@@ -21,7 +21,7 @@ type CreateGroupChatParam struct {
 }
 
 type GroupRepository interface {
-	CreateGroupChat(ctx context.Context, param CreateGroupChatParam) (string, error)
+	CreateGroupChat(ctx context.Context, param CreateGroupChatParam) (string, map[string]chatmodel.GroupRole, int64, error)
 }
 
 type groupRepository struct {
@@ -36,10 +36,12 @@ func NewGroupRepository(sc *csql.SqlClient, rc *credis.RedisClient) GroupReposit
 	}
 }
 
-func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGroupChatParam) (string, error) {
+func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGroupChatParam) (string, map[string]chatmodel.GroupRole, int64, error) {
 	cts := time.Now().UnixMilli()
 	convId := chatmodel.GenerateGroupChatConvId(param.GroupNo)
 
+	uid2role := make(map[string]chatmodel.GroupRole, len(param.MembersInfo))
+	var grpMebCount int64
 	err := gr.sc.WithTransCtx(
 		ctx,
 		func(_ context.Context, tx *dbr.Tx) error {
@@ -64,6 +66,8 @@ func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGrou
 				} else {
 					role = chatmodel.OrdinaryMeb
 				}
+
+				uid2role[mebInfo.Uid] = role
 
 				_, ie = tx.InsertBySql(
 					`insert into t_group_item (group_no, uid, role, meb_avatar, meb_nickname, cts, uts) values(?,?,?,?,?,?,?) on duplicate key update meb_avatar = values(meb_avatar), meb_nickname = values(meb_nickname), uts = values(uts)`,
@@ -100,8 +104,8 @@ func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGrou
 					chatconst.GroupConv,
 					mebInfo.Uid,
 					param.GroupNo,
-					mebInfo.Avatar,
-					mebInfo.Nickname,
+					param.Avatar,
+					param.GroupName,
 					cts,
 					cts,
 				).Exec()
@@ -110,13 +114,23 @@ func (gr *groupRepository) CreateGroupChat(ctx context.Context, param CreateGrou
 					return ie
 				}
 			}
+
+			ie = tx.Select("count(1)").From("t_group_item").Where("group_no = ? and state = ?",
+				param.GroupNo,
+				chatmodel.GrpMebNormal,
+			).LoadOneContext(ctx, &grpMebCount)
+
+			if ie != nil {
+				return ie
+			}
+
 			return nil
 		},
 	)
 
 	if err != nil {
-		return "", err
+		return "", nil, 0, err
 	}
 
-	return convId, nil
+	return convId, uid2role, grpMebCount, nil
 }

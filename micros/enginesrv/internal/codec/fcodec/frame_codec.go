@@ -139,11 +139,16 @@ func NewForwardFrame(reqId string, bodies []byte) (Frame, error) {
 		CheckSum:   0,
 	}
 
+	uuReqId, err := uuid.Parse(reqId)
+	if err != nil {
+		uuReqId = [ReqIdSize]byte{}
+	}
+
 	return Frame{
 		Header: frh,
 		Payload: Payload{
 			PayloadProtocol: JsonPayload, // todo
-			ReqId:           uuid.MustParse(reqId),
+			ReqId:           uuReqId,
 			Body:            bodies,
 		},
 	}, nil

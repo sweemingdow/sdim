@@ -127,4 +127,7 @@ type ConvManager interface {
 
 	// 群聊会话
 	UpsertGroupChatConv(convId, groupNo, icon, title string, members []string) bool
+
+	// 群聊创建发送消息成功后
+	UpdateGroupChatAfterCreatedEventSent(convId string, msgId, lastActiveTs int64)
 }

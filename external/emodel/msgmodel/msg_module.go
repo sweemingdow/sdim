@@ -2,17 +2,37 @@ package msgmodel
 
 import (
 	"github.com/sweemingdow/sdim/external/eglobal/chatconst"
+	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
 )
 
 type MsgType uint16
 
 const (
+	// chat
+	// text
 	TextType MsgType = 1
+
+	// image
+	ImageType MsgType = 2
+
+	// custom
+	CustomType MsgType = 100
+
+	// cmd
+	CmdType MsgType = 1000
+)
+
+type SubCmdType uint16
+
+const (
+	// 邀请入群
+	SubCmdGroupInvited SubCmdType = 1001
 )
 
 type SenderInfo struct {
-	Nickname string `json:"nickname,omitempty"`
-	Avatar   string `json:"avatar,omitempty"`
+	SenderType chatmodel.SenderType `json:"senderType"`
+	Nickname   string               `json:"nickname,omitempty"`
+	Avatar     string               `json:"avatar,omitempty"`
 }
 
 type MsgItemInMem struct {
@@ -43,4 +63,14 @@ type LastMsg struct {
 
 func ValidateMsgContent(mc *MsgContent) error {
 	return nil
+}
+
+func BuildGroupInvitedCmdMsg(inviteContent map[string]any) *MsgContent {
+	return &MsgContent{
+		Type: CmdType,
+		Content: map[string]any{
+			"subCmd":        SubCmdGroupInvited,
+			"inviteContent": inviteContent,
+		},
+	}
 }

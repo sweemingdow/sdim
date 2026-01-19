@@ -2,6 +2,7 @@ package msgpd
 
 import (
 	"github.com/sweemingdow/sdim/external/eglobal/chatconst"
+	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
 )
 
@@ -13,6 +14,7 @@ type MsgSendReceivePayload struct {
 	MsgSeq           int64                `json:"msgSeq,omitempty"`
 	ChatType         chatconst.ChatType   `json:"chatType,omitempty"`
 	Sender           string               `json:"sender,omitempty"`
+	SenderType       chatmodel.SenderType `json:"senderType,omitempty"`
 	Receiver         string               `json:"receiver,omitempty"`
 	Members          []string             `json:"members,omitempty"`
 	ReqId            string               `json:"reqId,omitempty"`
