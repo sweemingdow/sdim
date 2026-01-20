@@ -3,6 +3,7 @@ package hhttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/nsqio/go-nsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cid/sfid"
@@ -148,6 +149,8 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	// 群组管理
 	ghh.gm.OnGroupCreated(grpNo, req.OwnerUid, uid2role)
 
+	hintFmt, fmtItems := ghh.buildInviteInfoFmt(uid2info, newMebs)
+
 	inviteMsg := &msgmodel.LastMsg{
 		MsgId: sfid.Next(),
 		SenderInfo: msgmodel.SenderInfo{
@@ -155,12 +158,9 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		},
 		Content: msgmodel.BuildGroupInvitedCmdMsg(
 			map[string]any{
-				"inviteInfo": map[string]any{
-					"uid":      req.OwnerUid,
-					"nickname": uid2info[req.OwnerUid].Nickname,
-				},
-				"groupMebCount": grpMebCnt,
-				"inviteHint":    ghh.buildInviteHint(uid2info, req.Members),
+				"inviteFmtItems": fmtItems,
+				"groupMebCount":  grpMebCnt,
+				"inviteHint":     hintFmt,
 			},
 		),
 	}
@@ -176,7 +176,7 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		Ts:             mills,
 		Members:        newMebs,
 		MebId2UnitInfo: nil,
-		Sender:         chatmodel.SysSendUser,
+		Sender:         chatmodel.SysAutoSend,
 		Receiver:       grpNo,
 		RelationId:     grpNo,
 		FollowMsg:      inviteMsg,
@@ -225,20 +225,28 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	return c.Send(bodies)
 }
 
-func (ghh *GroupHttpHandler) buildInviteHint(uid2info map[string]*rpcuser.UnitInfoRespItem, members []string) string {
+func (ghh *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.UnitInfoRespItem, members []string) (string, []chatmodel.UidNickname) {
+	uidNicknames := make([]chatmodel.UidNickname, len(members))
 	var appender strings.Builder
 	appender.WriteString("{0}邀请")
+	// todo fori 遍历
 	for idx, mebUid := range members {
-		if info, ok := uid2info[mebUid]; ok {
-			appender.WriteString(info.Nickname)
+		info, ok := uid2info[mebUid]
+		nickname := info.Nickname
+		uidNicknames[idx+1] = chatmodel.UidNickname{
+			Uid:      mebUid,
+			Nickname: nickname,
+		}
 
+		if ok {
+			appender.WriteString(fmt.Sprintf("{%d}", idx))
 			if idx != len(members)-1 {
 				appender.WriteString("丶")
 			}
 		}
 	}
 	appender.WriteString("加入了群聊")
-	return appender.String()
+	return appender.String(), uidNicknames
 }
 
 func (ghh *GroupHttpHandler) OnCreated(_ chan<- error) {

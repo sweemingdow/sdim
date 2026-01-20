@@ -48,11 +48,16 @@ func (th *TopicHandler) HandleMsgComing(c *arpc.Context) {
 		validChat = false
 	}
 
-	// todo 验证群聊和convid
-
 	if !validChat {
 		srpc.WriteLoggedIfError(c, rpccall.SimpleParamValidateErr(fmt.Sprintf("invalid chat type:%d", rr.ChatType), ""))
 		return
+	}
+
+	if rr.ChatType == chatconst.GroupChat {
+		if rr.ConvId == "" {
+			srpc.WriteLoggedIfError(c, rpccall.SimpleParamValidateErr(fmt.Sprintf("invalid convId with chatType:%d", rr.ChatType), ""))
+			return
+		}
 	}
 
 	param := core.MsgComingParamFrom(rr, req.ReqId)

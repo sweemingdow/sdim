@@ -7,6 +7,7 @@ import (
 )
 
 type MsgComingReq struct {
+	ConvId         string               `json:"convId,omitempty"`
 	Sender         string               `json:"sender,omitempty"`
 	Receiver       string               `json:"receiver,omitempty"`
 	ChatType       chatconst.ChatType   `json:"chatType,omitempty"`

@@ -158,6 +158,7 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 				clg.Debug().Msgf("handle send frame, frame:%+v, msgContent:%+v", sendFrb, *sendFrb.MsgContent)
 
 				req := rpctopic.MsgComingReq{
+					ConvId:         sendFrb.ConvId,
 					Sender:         sendFrb.Sender,
 					Receiver:       sendFrb.Receiver,
 					ChatType:       sendFrb.ChatType,

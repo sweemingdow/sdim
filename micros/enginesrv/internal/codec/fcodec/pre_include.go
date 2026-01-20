@@ -24,6 +24,7 @@ type (
 	ErrCode uint32
 
 	SendFrame struct {
+		ConvId         string               `json:"convId,omitempty"`   // 会话id
 		Sender         string               `json:"sender,omitempty"`   // 发送者uid
 		Receiver       string               `json:"receiver,omitempty"` // 接收者, 单聊是对方的uid, 群聊是群id
 		ChatType       chatconst.ChatType   `json:"chatType,omitempty"`

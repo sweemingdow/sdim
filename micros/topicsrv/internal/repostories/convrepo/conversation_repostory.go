@@ -93,7 +93,9 @@ type (
 
 		GetConvTreeWithP2p(ctx context.Context, convId string) (map[string]string, error)
 
-		GetConvTreesWithP2p(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error)
+		GetConvTreeWithGroup(ctx context.Context, convId string) (map[string]string, error)
+
+		GetUserConvTrees(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error)
 
 		// 清除未读
 		ClearUnread(ctx context.Context, convId, uid string) (int64, error)
@@ -461,14 +463,32 @@ func (cr *convRepository) GetConvTreeWithP2p(ctx context.Context, convId string)
 	return convTree, nil
 }
 
-func (cr *convRepository) GetConvTreesWithP2p(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error) {
+func (cr *convRepository) GetConvTreeWithGroup(ctx context.Context, convId string) (map[string]string, error) {
+	// 大群需要改为scan
+	var convTreeVal map[string]string
+	err := cr.rc.With(func(cli redis.UniversalClient) error {
+		m, e := cli.HGetAll(ctx, pkgConvTreeKey(convId)).Result()
+		if e != nil {
+			return e
+		}
+
+		convTreeVal = m
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return convTreeVal, nil
+}
+
+func (cr *convRepository) GetUserConvTrees(ctx context.Context, uid string, convIds []string) (map[string]map[string]string, error) {
 	var sliceCmds []*redis.SliceCmd
 	err := cr.rc.With(func(cli redis.UniversalClient) error {
 		cmds, ie := cli.Pipelined(ctx, func(pl redis.Pipeliner) error {
 			for _, convId := range convIds {
 				fields := []string{MsgSeqKey, LastMsgIdKey, LastActiveTs, PkgBrowseSeqKey(uid)}
-				fields = append(fields)
-
 				pl.HMGet(ctx, pkgConvTreeKey(convId), fields...)
 			}
 			return nil

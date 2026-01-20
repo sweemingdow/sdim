@@ -23,15 +23,17 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/nsqsend"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/convrepo"
+	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
 	"golang.org/x/sync/singleflight"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 func init() {
-	sfid.Setting(true)
+	sfid.Setting(false)
 }
 
 type convManager struct {
@@ -51,6 +53,7 @@ type convManager struct {
 	done         chan struct{}
 	closed       atomic.Bool
 	cr           convrepo.ConvRepository
+	gr           grouprepo.GroupRepository
 	nsdPd        *cnsq.NsqProducer
 	doneChan     chan *nsq.ProducerTransaction
 	userProvider rpcuser.UserInfoRpcProvider
@@ -58,14 +61,17 @@ type convManager struct {
 	msgCap       int
 	sfg          singleflight.Group
 	ms           *nsqsend.MsgSender
+	gm           core.GroupManager
 }
 
 func NewConvManager(esCap, strip, msgCap int,
 	cr convrepo.ConvRepository,
+	gr grouprepo.GroupRepository,
 	nsdPd *cnsq.NsqProducer,
 	userProvider rpcuser.UserInfoRpcProvider,
 	msgProvider rpcmsg.MsgProvider,
 	ms *nsqsend.MsgSender,
+	gm core.GroupManager,
 ) core.ConvManager {
 	cm := &convManager{
 		//convId2items:  haxmap.New[string, *core.Conversation](uintptr(esCap)),
@@ -75,12 +81,14 @@ func NewConvManager(esCap, strip, msgCap int,
 		uidSegLock:    guc.NewSegmentRwLock[string](strip, nil),
 		done:          make(chan struct{}),
 		cr:            cr,
+		gr:            gr,
 		userProvider:  userProvider,
 		msgProvider:   msgProvider,
 		nsdPd:         nsdPd,
 		doneChan:      make(chan *nsq.ProducerTransaction, 10),
 		msgCap:        msgCap,
 		ms:            ms,
+		gm:            gm,
 	}
 
 	go cm.receiveMqSendAsyncResult()
@@ -113,7 +121,13 @@ func (cm *convManager) OnMsgComing(pa core.MsgComingParam) core.MsgComingResult 
 		}
 	}
 
-	convId := generateP2pConvId(pa)
+	var convId = pa.ConvId
+	if pa.ChatType == chatconst.P2pChat {
+		if convId == "" {
+			convId = generateP2pConvId(pa)
+		}
+	}
+
 	var mcr = core.MsgComingResult{
 		MsgId:  sfid.Next(),
 		ConvId: convId,
@@ -250,7 +264,7 @@ func (cm *convManager) SyncHotConvList(uid string) []*core.ConvListItem {
 	})
 
 	// redis中捞会话
-	convTrees, err := cm.cr.GetConvTreesWithP2p(ctx, uid, convIds)
+	convTrees, err := cm.cr.GetUserConvTrees(ctx, uid, convIds)
 	if err != nil {
 		lg.Error().Str("uid", uid).Stack().Err(err).Msg("find conv tree failed without mem in sync")
 		return make([]*core.ConvListItem, 0)
@@ -745,19 +759,23 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 
 					convWrap, ok = cm.uid2convItems[uid]
 
+					var convWrapOk bool
 					if ok {
+						convWrapOk = true
 						if mebConv, ok := convWrap.ConvId2Item[convId]; ok {
 							updateConvFieldsFunc(mebConv, convItem)
 							return nil, nil
 						}
 					}
 
-					convWrap = &core.MemberConvWrap{
-						ConvId2Item: make(map[string]*core.MemberConv, 100),
-						ConvItems:   make([]*core.MemberConv, 0, 100),
-					}
+					if !convWrapOk {
+						convWrap = &core.MemberConvWrap{
+							ConvId2Item: make(map[string]*core.MemberConv, 100),
+							ConvItems:   make([]*core.MemberConv, 0, 100),
+						}
 
-					cm.uid2convItems[uid] = convWrap
+						cm.uid2convItems[uid] = convWrap
+					}
 
 					mebConv := &core.MemberConv{
 						Id:           convId,
@@ -873,22 +891,264 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 }
 
 func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chatconst.ConvType, pa core.MsgComingParam) (int64, error) {
-	return 0, nil
-}
+	grpNo := pa.Receiver
+	lg := mylog.AppLogger()
 
-//func (cm *convManager) sendMsgWithMq(pd *msgpd.MsgSendReceivePayload) error {
-//	b, err := json.Fmt(pd)
-//	if err != nil {
-//		return err
-//	}
-//	// 拿到会话, mq异步移到msg_srv
-//	err = cm.nsdPd.PublishAsync(cnsq.PublishParam{
-//		Topic:   nsqconst.MsgReceiveTopic,
-//		Payload: b,
-//	}, cm.doneChan, []any{pd.ConvId, pd.MsgSeq, pd.MsgId, pd.ConvLastActiveTs, pd.Sender, pd.Members})
-//
-//	return err
-//}
+	ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Second)
+	defer cancel()
+
+	chrVal, rstErr := cm.convSegLock.WithLockManual(
+		convId,
+		func(lock *sync.RWMutex) (any, error) {
+			lock.RLock()
+			c, ok := cm.convId2items[convId]
+			lock.RUnlock()
+
+			// 群聊会话已经存在
+			if ok {
+				return convHandleResult{
+					conv: c,
+				}, nil
+			}
+
+			lock.Lock()
+			defer lock.Unlock()
+
+			c, ok = cm.convId2items[convId]
+			if ok {
+				return convHandleResult{
+					conv: c,
+				}, nil
+			}
+
+			// db查询会话下的所有子会话, 先这样捞着
+			conv, err := cm.cr.FindConvItems(ctx, convId)
+			if err != nil {
+				return convHandleResult{}, err
+			}
+
+			// 会话记录存在
+			if conv != nil {
+				c = cm.dbConv2localForGroup(conv)
+				lg.Trace().Str("conv_id", convId).Msg("group conversion was exist in db")
+
+				cm.convId2items[convId] = c
+
+				return convHandleResult{
+					conv:      c,
+					convItems: conv.Items,
+				}, nil
+			} else { // 缓存个空值
+				c = cm.dbConv2localEmptyForGroup(convId)
+				lg.Trace().Str("conv_id", convId).Msg("group conversion was not exist in db, cached empty value")
+
+				cm.convId2items[convId] = c
+
+				return convHandleResult{
+					conv: c,
+				}, nil
+			}
+
+		},
+	)
+
+	if rstErr != nil {
+		return 0, rstErr
+	}
+
+	chr := chrVal.(convHandleResult)
+
+	// 处理用户会话
+	if len(chr.convItems) > 0 {
+		// 查群组信息
+
+		convTreeVal, err, _ := cm.sfg.Do(
+			convId,
+			func() (interface{}, error) {
+				return cm.cr.GetConvTreeWithGroup(ctx, convId)
+			},
+		)
+
+		if err != nil {
+			return 0, err
+		}
+
+		convTree, _ := convTreeVal.(map[string]string)
+
+		var extractFunc = func(tree map[string]string, key string) int64 {
+			if valStr, ok := tree[key]; ok {
+				if val, pe := strconv.ParseInt(valStr, 10, 64); pe == nil {
+					return val
+				}
+			}
+
+			return 0
+		}
+
+		var msgSeq, lastMsgId, lastActiveTs int64
+		msgSeq = extractFunc(convTree, convrepo.MsgSeqKey)
+		lastMsgId = extractFunc(convTree, convrepo.LastMsgIdKey)
+		lastActiveTs = extractFunc(convTree, convrepo.LastActiveTs)
+
+		_, _ = cm.convSegLock.WithLock(
+			convId,
+			func() (any, error) {
+				if convItem, ok := cm.convId2items[convId]; ok {
+					if convItem.MsgSeq <= msgSeq {
+						convItem.MsgSeq = msgSeq
+						convItem.LastActiveTs = lastActiveTs
+						convItem.LastMsgId = lastMsgId
+					}
+				}
+				return nil, nil
+			},
+		)
+
+		group, err := cm.gr.FindGroupInfo(ctx, grpNo)
+		if err != nil {
+			return 0, err
+		}
+
+		var browseSeq int64
+		for _, convItem := range chr.convItems {
+			uid := convItem.OwnerUid
+			browseSeq = extractFunc(convTree, convrepo.PkgBrowseSeqKey(uid))
+
+			unreadCnt := msgSeq - browseSeq
+			if unreadCnt < 0 {
+				unreadCnt = 0
+			}
+			_, _ = cm.uidSegLock.WithLockManual(
+				uid,
+				func(lock *sync.RWMutex) (any, error) {
+					lock.RLock()
+					convWrap, ok := cm.uid2convItems[uid]
+					lock.RUnlock()
+
+					var updateConvFieldsFunc = func(mv *core.MemberConv, ci *convrepo.ConvItem) {
+						var title = group.GroupName
+						if ci.Remark != "" {
+							title = ci.Remark
+						}
+						mv.Title = title
+						mv.Icon = ci.Icon
+						mv.BrowseMsgSeq = browseSeq
+						mv.UnreadCount = unreadCnt
+					}
+
+					if ok {
+						lock.Lock()
+						// 更新部分属性
+						mebConv, ok := convWrap.ConvId2Item[convId]
+
+						if ok {
+							updateConvFieldsFunc(mebConv, convItem)
+
+							lock.Unlock()
+							return nil, nil
+						}
+
+						lock.Unlock()
+					}
+
+					lock.Lock()
+					defer lock.Unlock()
+
+					convWrap, ok = cm.uid2convItems[uid]
+					if ok {
+						if mebConv, ok := convWrap.ConvId2Item[convId]; ok {
+							updateConvFieldsFunc(mebConv, convItem)
+							return nil, nil
+						}
+					} else {
+						convWrap = &core.MemberConvWrap{
+							ConvId2Item: make(map[string]*core.MemberConv, 100),
+							ConvItems:   make([]*core.MemberConv, 0, 100),
+						}
+
+						cm.uid2convItems[uid] = convWrap
+					}
+
+					var title = group.GroupName
+					if convItem.Remark != "" {
+						title = convItem.Remark
+					}
+
+					mebConv := &core.MemberConv{
+						Id:           convId,
+						Type:         convType,
+						Icon:         convItem.Icon,
+						Title:        title,
+						RelationId:   convItem.RelationId,
+						Remark:       convItem.Remark,
+						PinTop:       convItem.PinTop,
+						NoDisturb:    convItem.NoDisturb,
+						BrowseMsgSeq: browseSeq,
+						UnreadCount:  unreadCnt,
+						Cts:          convItem.Cts,
+						Uts:          convItem.Uts,
+					}
+
+					convWrap.ConvId2Item[convId] = mebConv
+					convWrap.ConvItems = append(convWrap.ConvItems, mebConv)
+
+					return nil, nil
+				})
+		}
+	}
+
+	// 群管理
+	canInfo, err := cm.gm.OnSendMsgInGroup(ctx, grpNo, pa.Sender)
+	if err != nil {
+		return 0, err
+	}
+
+	if err = cm.canSendMsgInGroup(canInfo); err != nil {
+		return 0, err
+	}
+
+	seq, lastTs, err := cm.cr.ModifyConvTree(ctx, pa.Sender, convId, msgId)
+
+	if err != nil {
+		return 0, err
+	}
+
+	pd := &msgpd.MsgSendReceivePayload{
+		ConvId:           convId,
+		ConvLastActiveTs: lastTs,
+		MsgId:            msgId,
+		ClientUniqueId:   pa.ClientUniqueId,
+		MsgSeq:           seq,
+		ChatType:         pa.ChatType,
+		SenderType:       chatmodel.UserSender,
+		Sender:           pa.Sender,
+		Receiver:         pa.Receiver,
+		Members:          canInfo.ForwardMembers,
+		ReqId:            pa.ReqId,
+		SendTs:           time.Now().UnixMilli(),
+		MsgContent:       pa.MsgContent,
+	}
+
+	err = cm.ms.SendMsg(
+		pd,
+		cm.doneChan,
+		[]any{
+			pd.ConvId,
+			pd.MsgSeq,
+			pd.MsgId,
+			pd.ConvLastActiveTs,
+			pd.Sender,
+			pd.Members,
+		},
+	)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return seq, nil
+
+}
 
 func (cm *convManager) dbConv2local(conv *convrepo.Conv, sender, receiver string) *core.Conversation {
 	msgQue := &deque.Deque[*msgmodel.MsgItemInMem]{}
@@ -914,6 +1174,63 @@ func (cm *convManager) dbConv2local(conv *convrepo.Conv, sender, receiver string
 
 	c.Members[sender] = struct{}{}
 	c.Members[receiver] = struct{}{}
+
+	return c
+}
+
+func (cm *convManager) canSendMsgInGroup(info core.CanSendInfo) error {
+	if info.GrpState != chatmodel.GrpNormal {
+		return errors.New(fmt.Sprintf("can not send msg in this group, state:%d", info.GrpState))
+	} else if info.MebNotInGrp {
+		return errors.New("can not send msg in this group, member not in")
+	} else if info.GrpMebState != chatmodel.GrpMebNormal {
+		return errors.New(fmt.Sprintf("can not send msg in this group, mebState:%d", info.GrpMebState))
+	} else if info.ForbiddenAt > time.Now().Unix() {
+		return errors.New(fmt.Sprintf("can not send msg in this group, forbbiden remains:%d seconds", time.Now().Unix()-info.ForbiddenAt))
+	}
+
+	return nil
+}
+
+func (cm *convManager) dbConv2localForGroup(conv *convrepo.Conv) *core.Conversation {
+	msgQue := &deque.Deque[*msgmodel.MsgItemInMem]{}
+	msgQue.SetBaseCap(cm.msgCap)
+	var mCap int
+	if chatconst.ConvType(conv.ConvType) == chatconst.P2pConv {
+		mCap = 2
+	} else if chatconst.ConvType(conv.ConvType) == chatconst.CustomerConv {
+		mCap = 3
+	} else {
+		mCap = len(conv.Items)
+	}
+
+	c := &core.Conversation{
+		Id:           conv.ConvId,
+		Type:         chatconst.ConvType(conv.ConvType),
+		Members:      make(map[string]struct{}, mCap),
+		RecentlyMsgs: msgQue,
+		LastActiveTs: conv.LastActiveTs,
+		LastMsgId:    conv.LastMsgId,
+		MsgSeq:       conv.MsgSeq,
+	}
+
+	for _, item := range conv.Items {
+		c.Members[item.OwnerUid] = struct{}{}
+	}
+
+	return c
+}
+
+func (cm *convManager) dbConv2localEmptyForGroup(convId string) *core.Conversation {
+	msgQue := &deque.Deque[*msgmodel.MsgItemInMem]{}
+	msgQue.SetBaseCap(1)
+
+	c := &core.Conversation{
+		Id:           convId,
+		Type:         chatconst.GroupConv,
+		Members:      make(map[string]struct{}),
+		RecentlyMsgs: msgQue,
+	}
 
 	return c
 }

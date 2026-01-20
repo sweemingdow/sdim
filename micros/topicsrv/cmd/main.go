@@ -16,8 +16,8 @@ import (
 	"github.com/sweemingdow/sdim/external/erpc/rpcmsg"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/config/tsncfg"
-	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/convmgr"
+	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/grpmgr"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/nsqsend"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hhttp"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/handlers/hmq/msgforward"
@@ -84,15 +84,19 @@ func main() {
 
 		userProvider := rpcuser.NewUserInfoRpcProvider(ac.GetArpcClientFactory())
 		ms := nsqsend.NewMsgSender(nsqPd)
+		groupRepo := grouprepo.NewGroupRepository(sc, rc)
+		groupMgr := grpmgr.NewGroupManager(100, groupRepo)
 		cm := convmgr.NewConvManager(
 			100,
 			128,
 			100,
 			convrepo.NewConvRepository(rc, sc),
+			groupRepo,
 			nsqPd,
 			userProvider,
 			rpcmsg.NewMsgProvider(ac.GetArpcClientFactory()),
 			ms,
+			groupMgr,
 		)
 
 		nsqFactory := cnsq.NewStaticNsqMsgConsumeFactory()
@@ -109,9 +113,6 @@ func main() {
 
 		convHttpHandler := hhttp.NewConvHttpHandler(cm)
 
-		groupRepo := grouprepo.NewGroupRepository(sc, rc)
-
-		groupMgr := core.NewGroupManager(100)
 		groupHttpHandler := hhttp.NewGroupHttpHandler(cm, groupRepo, groupMgr, ms, userProvider)
 		ac.CollectLifecycle("groupHttpHandler", groupHttpHandler)
 

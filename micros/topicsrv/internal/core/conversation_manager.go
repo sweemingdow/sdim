@@ -11,6 +11,7 @@ import (
 )
 
 type MsgComingParam struct {
+	ConvId         string
 	Sender         string
 	Receiver       string
 	ChatType       chatconst.ChatType
@@ -30,6 +31,7 @@ type MsgComingResult struct {
 
 func MsgComingParamFrom(req rpctopic.MsgComingReq, reqId string) MsgComingParam {
 	return MsgComingParam{
+		ConvId:         req.ConvId,
 		Sender:         req.Sender,
 		Receiver:       req.Receiver,
 		ChatType:       req.ChatType,
