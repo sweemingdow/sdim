@@ -229,7 +229,7 @@ func (ghh *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.Uni
 	uidNicknames := make([]chatmodel.UidNickname, len(members))
 	var appender strings.Builder
 	appender.WriteString("{0}邀请")
-	// todo fori 遍历
+	// todo fori 遍历 ok no
 	for idx, mebUid := range members {
 		info, ok := uid2info[mebUid]
 		nickname := info.Nickname
