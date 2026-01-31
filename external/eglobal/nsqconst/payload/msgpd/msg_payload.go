@@ -8,6 +8,7 @@ import (
 
 type MsgSendReceivePayload struct {
 	ConvId           string               `json:"convId,omitempty"`
+	ConvType         chatconst.ConvType   `json:"convType,omitempty"`
 	MsgId            int64                `json:"msgId,omitempty"`
 	ConvLastActiveTs int64                `json:"convLastActiveTs,omitempty"` // 会话最后的活跃时间(最后一条消息的时间)
 	ClientUniqueId   string               `json:"clientUniqueId,omitempty"`   // 客户端唯一id
@@ -26,6 +27,7 @@ type MsgSendReceivePayload struct {
 type MsgForwardPayload struct {
 	ReqId            string             `json:"reqId,omitempty"`
 	ConvId           string             `json:"convId,omitempty"`
+	ConvType         chatconst.ConvType `json:"convType,omitempty"`
 	ConvLastActiveTs int64              `json:"convLastActiveTs,omitempty"`
 	MsgId            int64              `json:"msgId,omitempty"`
 	ClientUniqueId   string             `json:"clientUniqueId,omitempty"` // 客户端唯一id
@@ -51,6 +53,7 @@ func ReceivePd2forwardPd(rpd *MsgSendReceivePayload, msg *Msg, mills int64) *Msg
 	return &MsgForwardPayload{
 		ReqId:            rpd.ReqId,
 		ConvId:           rpd.ConvId,
+		ConvType:         rpd.ConvType,
 		ConvLastActiveTs: rpd.ConvLastActiveTs,
 		MsgId:            rpd.MsgId,
 		ClientUniqueId:   rpd.ClientUniqueId,

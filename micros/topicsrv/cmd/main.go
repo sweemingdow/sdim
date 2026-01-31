@@ -9,7 +9,6 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
 	"github.com/sweemingdow/gmicro_pkg/pkg/decorate/dnacos"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
-	"github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
 	"github.com/sweemingdow/gmicro_pkg/pkg/routebinder"
 	"github.com/sweemingdow/sdim/external/econfig"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
@@ -45,10 +44,7 @@ func main() {
 		lg := mylog.AppLogger()
 		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
 
-		resp := wrapper.GeneralErr(err)
-		bodies, _ := json.Fmt(resp)
-
-		return c.Send(bodies)
+		return c.JSON(wrapper.GeneralErr(err))
 	}))
 
 	// 启动rpc服务

@@ -69,7 +69,7 @@ func (mfh *convAddHandler) HandleMessage(message *nsq.Message) error {
 		dataMap["chatType"] = pd.ChatType
 		dataMap["sender"] = pd.Sender
 		dataMap["receiver"] = pd.Receiver
-		dataMap["followMsg"] = pd.FollowMsg
+		//dataMap["followMsg"] = pd.FollowMsg
 
 		relationId = pd.RelationId
 		if relationId == "" {

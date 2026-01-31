@@ -52,6 +52,7 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 	// mq到engine_server, 推ConvUpdateFrame帧到客户端
 	pd := convpd.ConvLastMsgUpdateEventPayload{
 		ConvId:          msp.ConvId,
+		ConvType:        msp.ConvType,
 		Members:         append([]string{msp.Sender}, msp.Members...),
 		LastMsg:         msr.LastMsg,
 		LastActiveTs:    msr.LastActiveTs,

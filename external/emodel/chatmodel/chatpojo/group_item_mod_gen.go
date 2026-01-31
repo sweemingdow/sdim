@@ -15,7 +15,7 @@ type GroupItem struct {
 	Role        int8           `db:"role"`         // 角色:[1=群主,2=管理员,3=普通成员]
 	MebAvatar   sql.NullString `db:"meb_avatar"`   // 头像
 	MebNickname sql.NullString `db:"meb_nickname"` // 昵称
-	Remark      sql.NullString `db:"remarK"`       // 备注
+	Remark      sql.NullString `db:"remark"`       // 备注
 	ForbidenDur int32          `db:"forbiden_dur"` // 禁言时长(sec)
 	ForbiddenAt int64          `db:"forbidden_at"` // 禁言时间:[-1=永久,0=未禁言,other=tsSec]
 	Cts         int64          `db:"cts"`          // 创建时间戳(ms)

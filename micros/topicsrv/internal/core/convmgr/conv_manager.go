@@ -401,16 +401,49 @@ func (cm *convManager) UpsertGroupChatConv(convId, groupNo, icon, title string, 
 			return nil, nil
 		})
 
-	uid2convAdded := make(map[string]bool, len(members))
+	//uid2convAdded := make(map[string]bool, len(members))
 	for _, mebUid := range members {
-		addedVal, _ := cm.uidSegLock.WithLockManual(
+		_, _ = cm.uidSegLock.WithLockManual(
 			mebUid,
 			func(lock *sync.RWMutex) (any, error) {
 				lock.RLock()
 				convWrap, ok := cm.uid2convItems[mebUid]
 				lock.RUnlock()
 
+				lock.Lock()
+				defer lock.Unlock()
+
+				if !ok {
+					// convWrap不存在, 先初始化
+					convWrap = &core.MemberConvWrap{
+						ConvId2Item: make(map[string]*core.MemberConv, 100),
+						ConvItems:   make([]*core.MemberConv, 0, 100),
+					}
+
+					cm.uid2convItems[mebUid] = convWrap
+				}
+
+				mebConv, ok := convWrap.ConvId2Item[convId]
 				if ok {
+					mebConv.Icon = icon
+					mebConv.Title = title
+					return false, nil
+				}
+
+				mebConv = &core.MemberConv{
+					Id:         convId,
+					Type:       chatconst.GroupConv,
+					Icon:       icon,
+					Title:      title,
+					RelationId: groupNo,
+				}
+
+				convWrap.ConvId2Item[convId] = mebConv
+				convWrap.ConvItems = append(convWrap.ConvItems, mebConv)
+
+				return true, nil
+
+				/*if ok {
 					return false, nil
 				}
 
@@ -435,11 +468,11 @@ func (cm *convManager) UpsertGroupChatConv(convId, groupNo, icon, title string, 
 				convWrap.ConvId2Item[convId] = mebConv
 				convWrap.ConvItems = append(convWrap.ConvItems, mebConv)
 
-				return true, nil
+				return true, nil*/
 			})
 
-		added := addedVal.(bool)
-		uid2convAdded[mebUid] = added
+		//added := addedVal.(bool)
+		//uid2convAdded[mebUid] = added
 	}
 
 	return false
@@ -812,10 +845,10 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 				Sender:         pa.Sender,
 				Receiver:       pa.Receiver,
 				//RelationId:     pa.Receiver, // 单聊不需要
-				FollowMsg: &msgmodel.LastMsg{
-					MsgId:   msgId,
-					Content: pa.MsgContent,
-				},
+				//FollowMsg: &msgmodel.LastMsg{
+				//	MsgId:   msgId,
+				//	Content: pa.MsgContent,
+				//},
 			}
 
 			for _, item := range chr.convItems {
@@ -826,13 +859,13 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 				}
 			}
 
-			unitInfo, ok := pd.MebId2UnitInfo[pa.Sender]
-			if ok {
-				pd.FollowMsg.SenderInfo = msgmodel.SenderInfo{
-					Nickname: unitInfo.Title,
-					Avatar:   unitInfo.Icon,
-				}
-			}
+			//unitInfo, ok := pd.MebId2UnitInfo[pa.Sender]
+			//if ok {
+			//	pd.FollowMsg.SenderInfo = msgmodel.SenderInfo{
+			//		Nickname: unitInfo.Title,
+			//		Avatar:   unitInfo.Icon,
+			//	}
+			//}
 
 			lg = lg.With().Str("conv_id", convId).Logger()
 
@@ -856,6 +889,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 
 	pd := &msgpd.MsgSendReceivePayload{
 		ConvId:           convId,
+		ConvType:         convType,
 		ConvLastActiveTs: lastTs,
 		MsgId:            msgId,
 		ClientUniqueId:   pa.ClientUniqueId,
@@ -1115,6 +1149,7 @@ func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chat
 
 	pd := &msgpd.MsgSendReceivePayload{
 		ConvId:           convId,
+		ConvType:         convType,
 		ConvLastActiveTs: lastTs,
 		MsgId:            msgId,
 		ClientUniqueId:   pa.ClientUniqueId,

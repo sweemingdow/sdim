@@ -8,7 +8,6 @@ import (
 	"github.com/nsqio/go-nsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cid/sfid"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
-	"github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
@@ -71,7 +70,7 @@ type StartGroupChatReq struct {
 }
 
 // 发起群聊(创建并加入群聊)
-func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
+func (h *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	var req StartGroupChatReq
 	err := c.BodyParser(&req)
 	if err != nil {
@@ -89,7 +88,7 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		}
 	}
 
-	newMebs = append(newMebs, req.OwnerUid)
+	newMebs = append([]string{req.OwnerUid}, newMebs...)
 
 	if req.LimitedNum > 0 {
 		if len(newMebs) > req.LimitedNum {
@@ -102,7 +101,7 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	lg.Debug().Msgf("handle start group chat, req=%+v", req)
 
 	// rpc查用户信息
-	rpcResp, err := ghh.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
+	rpcResp, err := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
 	if err != nil {
 		return err
 	}
@@ -128,7 +127,7 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 
 	grpNo := utils.RandStr(32)
 
-	convId, uid2role, grpMebCnt, err := ghh.gr.CreateGroupChat(
+	convId, uid2role, grpMebCnt, err := h.gr.CreateGroupChat(
 		ctx,
 		grouprepo.CreateGroupChatParam{
 			GroupNo:     grpNo,
@@ -144,12 +143,12 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 	}
 
 	// 同步会话到内存
-	ghh.cm.UpsertGroupChatConv(convId, grpNo, req.Avatar, req.Avatar, newMebs)
+	h.cm.UpsertGroupChatConv(convId, grpNo, req.Avatar, req.Avatar, newMebs)
 
 	// 群组管理
-	ghh.gm.OnGroupCreated(grpNo, req.OwnerUid, uid2role)
+	h.gm.OnGroupCreated(grpNo, req.OwnerUid, uid2role)
 
-	hintFmt, fmtItems := ghh.buildInviteInfoFmt(uid2info, newMebs)
+	hintFmt, fmtItems := h.buildInviteInfoFmt(uid2info, newMebs, convId)
 
 	inviteMsg := &msgmodel.LastMsg{
 		MsgId: sfid.Next(),
@@ -179,16 +178,16 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		Sender:         chatmodel.SysAutoSend,
 		Receiver:       grpNo,
 		RelationId:     grpNo,
-		FollowMsg:      inviteMsg,
+		//FollowMsg:      inviteMsg,
 	}
 
 	lg = lg.With().Str("conv_id", convId).Logger()
 
 	lg.Debug().Msgf("group created, conv add event will be published, pd=%+v", pd)
 
-	ghh.ms.SendConvAddEvent(pd, lg)
+	h.ms.SendConvAddEvent(pd, lg)
 
-	err = ghh.ms.SendMsg(
+	err = h.ms.SendMsg(
 		&msgpd.MsgSendReceivePayload{
 			ConvId:           convId,
 			ConvLastActiveTs: mills,
@@ -204,7 +203,7 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 			SendTs:           mills,
 			MsgContent:       inviteMsg.Content,
 		},
-		ghh.doneChan,
+		h.doneChan,
 		[]any{
 			convId,
 			inviteMsg.MsgId,
@@ -216,29 +215,118 @@ func (ghh *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		return err
 	}
 
-	resp := wrapper.JustOk()
-	bodies, err := json.Fmt(resp)
+	return c.JSON(wrapper.JustOk())
+}
+
+type GroupDataResp struct {
+	GroupNo           string        `json:"groupNo,omitempty"`
+	GroupName         string        `json:"groupName,omitempty"`
+	GroupLimitedNum   int           `json:"groupLimitedNum,omitempty"`
+	GroupMebCount     int           `json:"groupMebCount,omitempty"`
+	GroupAnnouncement string        `json:"groupAnnouncement,omitempty"` // 群公告
+	MembersInfo       []MebInfoItem `json:"membersInfo"`                 // 群成员信息
+	GroupBak          string        `json:"groupBak,omitempty"`          // 群备注(仅自己可见)
+	NicknameInGroup   string        `json:"nicknameInGroup,omitempty"`   // 在群中的昵称
+}
+
+type MebInfoItem struct {
+	Id       int64  `json:"id,omitempty"`
+	Uid      string `json:"uid,omitempty"`
+	Nickname string `json:"nickname,omitempty"`
+	Avatar   string `json:"avatar,omitempty"`
+}
+
+func (h *GroupHttpHandler) HandleFetchGroupData(c *fiber.Ctx) error {
+	groupNo := c.Query("group_no")
+	if groupNo == "" {
+		return errors.New("group_no is required")
+	}
+
+	uid := c.Query("uid")
+	if uid == "" {
+		return errors.New("uid is required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	grp, err := h.gr.FindGroupInfo(ctx, groupNo)
 	if err != nil {
 		return err
 	}
 
-	return c.Send(bodies)
+	items, err := h.gr.FindGroupItems(ctx, groupNo)
+	if err != nil {
+		return err
+	}
+
+	resp := &GroupDataResp{
+		GroupNo:           grp.GroupNo,
+		GroupName:         grp.GroupName,
+		GroupLimitedNum:   int(grp.LimitedNum),
+		GroupMebCount:     len(items),
+		GroupAnnouncement: grp.Notice.String,
+	}
+	resp.MembersInfo = make([]MebInfoItem, 0, len(items))
+
+	for _, item := range items {
+		if item.Uid == uid {
+			resp.GroupBak = item.Remark.String
+			resp.NicknameInGroup = item.MebNickname.String
+		}
+
+		resp.MembersInfo = append(resp.MembersInfo, MebInfoItem{
+			Id:       item.Id,
+			Uid:      item.Uid,
+			Nickname: item.MebNickname.String,
+			Avatar:   item.MebAvatar.String,
+		})
+	}
+
+	return c.JSON(wrapper.RespOk(resp))
 }
 
-func (ghh *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.UnitInfoRespItem, members []string) (string, []chatmodel.UidNickname) {
+func (h *GroupHttpHandler) HandlerSettingGroupName(c *fiber.Ctx) error {
+	groupNo := c.Query("group_no")
+	if groupNo == "" {
+		return errors.New("groupNo is required")
+	}
+
+	groupName := c.Query("group_name")
+	if groupName == "" {
+		return errors.New("groupName is required")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ok, err := h.gr.SettingGroupName(ctx, groupNo, groupName)
+	if err != nil {
+		return err
+	}
+
+	// todo 修改会话title, 发送cmd消息, {0}修改群名称为:{groupName}
+
+	if ok {
+		return c.JSON(wrapper.JustOk())
+	}
+
+	return c.JSON(wrapper.JustGeneralErr())
+}
+
+func (h *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.UnitInfoRespItem, members []string, convId string) (string, []chatmodel.UidNickname) {
 	uidNicknames := make([]chatmodel.UidNickname, len(members))
 	var appender strings.Builder
 	appender.WriteString("{0}邀请")
-	// todo fori 遍历 ok no
+
 	for idx, mebUid := range members {
 		info, ok := uid2info[mebUid]
 		nickname := info.Nickname
-		uidNicknames[idx+1] = chatmodel.UidNickname{
+		uidNicknames[idx] = chatmodel.UidNickname{
 			Uid:      mebUid,
 			Nickname: nickname,
 		}
 
-		if ok {
+		if ok && idx > 0 {
 			appender.WriteString(fmt.Sprintf("{%d}", idx))
 			if idx != len(members)-1 {
 				appender.WriteString("丶")
@@ -249,31 +337,31 @@ func (ghh *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.Uni
 	return appender.String(), uidNicknames
 }
 
-func (ghh *GroupHttpHandler) OnCreated(_ chan<- error) {
+func (h *GroupHttpHandler) OnCreated(_ chan<- error) {
 
 }
 
-func (ghh *GroupHttpHandler) OnDispose(_ context.Context) error {
-	if !ghh.closed.CompareAndSwap(false, true) {
+func (h *GroupHttpHandler) OnDispose(_ context.Context) error {
+	if !h.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 
 	lg := mylog.AppLogger()
 	lg.Debug().Msg("group http handler stop now")
 
-	close(ghh.done)
+	close(h.done)
 
 	lg.Info().Msg("group http handler stopped successfully")
 
 	return nil
 }
 
-func (ghh *GroupHttpHandler) receiveMqSendAsyncResult() {
+func (h *GroupHttpHandler) receiveMqSendAsyncResult() {
 	for {
 		select {
-		case <-ghh.done:
+		case <-h.done:
 			return
-		case pt, ok := <-ghh.doneChan:
+		case pt, ok := <-h.doneChan:
 			if !ok {
 				return
 			}
@@ -304,7 +392,7 @@ func (ghh *GroupHttpHandler) receiveMqSendAsyncResult() {
 				continue
 			}
 
-			ghh.cm.UpdateGroupChatAfterCreatedEventSent(convId, msgId, lastTs)
+			h.cm.UpdateGroupChatAfterCreatedEventSent(convId, msgId, lastTs)
 
 			lg.Trace().Str("conv_id", convId).Int64("msg_id", msgId).Msg("group created, mq msg async send success")
 		}

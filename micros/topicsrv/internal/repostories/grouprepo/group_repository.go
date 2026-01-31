@@ -40,6 +40,8 @@ type GroupRepository interface {
 	FindGroupInfo(ctx context.Context, groupNo string) (*chatpojo.Group, error)
 
 	FindGroupItems(ctx context.Context, groupNo string) ([]*chatpojo.GroupItem, error)
+
+	SettingGroupName(ctx context.Context, groupNo, groupName string) (bool, error)
 }
 
 type groupRepository struct {
@@ -202,6 +204,36 @@ func (gr *groupRepository) FindGroupItems(ctx context.Context, groupNo string) (
 	}
 
 	return pojos, nil
+}
+
+func (gr *groupRepository) SettingGroupName(ctx context.Context, groupNo, groupName string) (bool, error) {
+	var suc bool
+	err := gr.sc.WithTransCtx(
+		ctx,
+		func(_ context.Context, tx *dbr.Tx) error {
+			rst, ie := tx.Update(chatpojo.Group{}.TableName()).Set("group_name", groupName).Where("group_no = ?", groupNo).Exec()
+			if ie != nil {
+				return ie
+			}
+			rows, _ := rst.RowsAffected()
+			suc = rows == 1
+			return nil
+		})
+
+	if err != nil {
+		return suc, err
+	}
+
+	err = gr.rc.With(func(cli redis.UniversalClient) error {
+		return cli.HSet(ctx, PkgGroupTreeKey(groupNo), GroupTitleKey, groupName).Err()
+	})
+
+	if err != nil {
+		suc = false
+		return suc, err
+	}
+
+	return suc, nil
 }
 
 func PkgGroupTreeKey(groupNo string) string {

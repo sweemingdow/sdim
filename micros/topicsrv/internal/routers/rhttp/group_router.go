@@ -8,6 +8,8 @@ import (
 func ConfigGroupRouter(fa *fiber.App, handler *hhttp.GroupHttpHandler) {
 	convGrp := fa.Group("/group")
 	convGrp.
-		Post("/start_chat", handler.HandleStartGroupChat)
+		Post("/start_chat", handler.HandleStartGroupChat).
+		Get("/fetch_group_data", handler.HandleFetchGroupData).
+		Post("/setting_group_name", handler.HandlerSettingGroupName)
 
 }

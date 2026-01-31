@@ -6,11 +6,12 @@ import (
 )
 
 type ConvLastMsgUpdateEventPayload struct {
-	ConvId          string            `json:"convId,omitempty"`
-	Members         []string          `json:"members,omitempty"`
-	LastMsg         *msgmodel.LastMsg `json:"lastMsg,omitempty"`
-	LastActiveTs    int64             `json:"lastActiveTs,omitempty"`
-	Uid2UnreadCount map[string]int64  `json:"uid2unreadCount,omitempty"`
+	ConvId          string             `json:"convId,omitempty"`
+	ConvType        chatconst.ConvType `json:"convType,omitempty"`
+	Members         []string           `json:"members,omitempty"`
+	LastMsg         *msgmodel.LastMsg  `json:"lastMsg,omitempty"`
+	LastActiveTs    int64              `json:"lastActiveTs,omitempty"`
+	Uid2UnreadCount map[string]int64   `json:"uid2unreadCount,omitempty"`
 }
 
 type MemberUnitInfo struct {
@@ -30,5 +31,5 @@ type ConvAddEventPayload struct {
 	RelationId     string                    `json:"relationId,omitempty"` // 公共的(群)
 	Members        []string                  `json:"members,omitempty"`
 	MebId2UnitInfo map[string]MemberUnitInfo `json:"mebId2UnitInfo,omitempty"` // 私有的(p2p)
-	FollowMsg      *msgmodel.LastMsg         `json:"followMsg,omitempty"`
+	//FollowMsg      *msgmodel.LastMsg         `json:"followMsg,omitempty"`
 }
