@@ -20,6 +20,10 @@ type ConnDriveEngine interface {
 	Run() error
 }
 
+const (
+	driveEngineLoggerName = "driveEngineLogger"
+)
+
 type connDriveEngine struct {
 	eng       gnet.Engine
 	addr      string
@@ -28,6 +32,7 @@ type connDriveEngine struct {
 	frCodec   fcodec.FrameCodec
 	frHandler core.FrameHandler
 	connMgr   core.ConnManager
+	dl        *mylog.DecoLogger
 }
 
 func NewConnDriveEngine(
@@ -45,6 +50,7 @@ func NewConnDriveEngine(
 		frCodec:   frCodec,
 		frHandler: frHandler,
 		connMgr:   connMgr,
+		dl:        mylog.NewDecoLogger(driveEngineLoggerName),
 	}
 }
 
@@ -56,8 +62,7 @@ func (cde *connDriveEngine) OnCreated(_ chan<- error) {
 func (cde *connDriveEngine) OnBoot(en gnet.Engine) (action gnet.Action) {
 	cde.eng = en
 
-	lg := mylog.AppLogger()
-	lg.Info().Msg("connection drive engin on boot")
+	cde.dl.Info().Msg("connection drive engin on boot")
 
 	return
 }
@@ -65,15 +70,14 @@ func (cde *connDriveEngine) OnBoot(en gnet.Engine) (action gnet.Action) {
 // OnShutdown fires when the engine is being shut down, it is called right after
 // all event-loops and connections are closed.
 func (cde *connDriveEngine) OnShutdown(en gnet.Engine) {
-	lg := mylog.AppLogger()
-	lg.Info().Msg("connection drive engin on shutdown")
+	cde.dl.Info().Msg("connection drive engin on shutdown")
 }
 
 // OnOpen fires when a new connection has been opened.
 // The parameter out is the return value which is going to be sent back to the remote.
 func (cde *connDriveEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 	ccCtx := core.BindConnCtxWhenOpen(c)
-	lg := core.LoggerWithCcCtx(ccCtx)
+	lg := core.LoggerWithCcCtx(ccCtx, cde.dl)
 	lg.Debug().Msg("a new connection was opened")
 
 	cde.connMgr.AddWhenOpened(core.ConnAddParam{
@@ -88,7 +92,7 @@ func (cde *connDriveEngine) OnOpen(c gnet.Conn) (out []byte, action gnet.Action)
 // The parameter err is the last known connection error.
 func (cde *connDriveEngine) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 	ccCtx := core.GetConnCtx(c)
-	lg := core.LoggerWithCcCtx(ccCtx)
+	lg := core.LoggerWithCcCtx(ccCtx, cde.dl)
 	if err != nil {
 		lg.Error().Stack().Err(err).Msg("a connection was closed, but has a error")
 	} else {
@@ -103,7 +107,7 @@ func (cde *connDriveEngine) OnClose(c gnet.Conn, err error) (action gnet.Action)
 // OnTraffic fires when a local socket receives data from the remote.
 func (cde *connDriveEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	ccCtx := core.GetConnCtx(c)
-	lg := core.LoggerWithCcCtx(ccCtx)
+	lg := core.LoggerWithCcCtx(ccCtx, cde.dl)
 
 	lg.Debug().Msg("connection drive engin on traffic")
 
@@ -155,8 +159,7 @@ func (cde *connDriveEngine) OnTraffic(c gnet.Conn) (action gnet.Action) {
 // OnTick fires immediately after the engine starts and will fire again
 // following the duration specified by the delay return value.
 func (cde *connDriveEngine) OnTick() (delay time.Duration, action gnet.Action) {
-	lg := mylog.AppLogger()
-	lg.Info().Msg("connection drive engin on tick")
+	cde.dl.Info().Msg("connection drive engin on tick")
 
 	return
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/repostories/inforepo"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/routers"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/services/infosrv"
+	"github.com/sweemingdow/sdim/pkg/wrapper"
 )
 
 func main() {
@@ -33,9 +34,10 @@ func main() {
 	booter.AddServerOption(boot.WithRpcServer())
 
 	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
-		lg := mylog.AppLogger()
+		lg := mylog.GetDecoLogger()
 		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
-		return c.SendString(err.Error())
+
+		return c.JSON(wrapper.GeneralErr(err))
 	}))
 
 	booter.StartAndServe(func(ac *boot.AppContext) (routebinder.AppRouterBinder, error) {

@@ -44,20 +44,20 @@ func GetConnId(c gnet.Conn) string {
 	return GetConnCtx(c).Id
 }
 
-func LoggerWithCcCtx(ccCtx *ConnCtx) zerolog.Logger {
-	return mylog.AppLogger().
+func LoggerWithCcCtx(ccCtx *ConnCtx, dl *mylog.DecoLogger) zerolog.Logger {
+	return dl.GetLogger().
 		With().
 		Str("conn_id", ccCtx.Id).
 		Logger()
 }
 
-func LoggerWithGnetConn(c gnet.Conn) zerolog.Logger {
+/*func LoggerWithGnetConn(c gnet.Conn) zerolog.Logger {
 	ccCtx := GetConnCtx(c)
 	return mylog.AppLogger().
 		With().
 		Str("conn_id", ccCtx.Id).
 		Logger()
-}
+}*/
 
 type ConnAddParam struct {
 	ConnId string

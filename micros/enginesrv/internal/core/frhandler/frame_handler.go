@@ -9,6 +9,7 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/app"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/myerr"
+	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
 	"github.com/sweemingdow/sdim/external/erpc/rpctopic"
@@ -25,6 +26,7 @@ type asyncFrameHandler struct {
 	nsqProducer      *cnsq.NsqProducer
 	topicProvider    rpctopic.TopicRpcProvider
 	userInfoProvider rpcuser.UserInfoRpcProvider
+	dl               *mylog.DecoLogger
 	isProd           bool
 }
 
@@ -42,13 +44,14 @@ func NewAsyncFrameHandler(
 		nsqProducer:      nsqProducer,
 		topicProvider:    topicProvider,
 		userInfoProvider: userInfoProvider,
+		dl:               mylog.NewDecoLogger("frameLogger"),
 		isProd:           app.GetTheApp().IsProdProfile(),
 	}
 }
 
 func (fh *asyncFrameHandler) Handle(connAuthed bool, c gnet.Conn, frs []fcodec.Frame) gnet.Action {
 	ccCtx := core.GetConnCtx(c)
-	lg := core.LoggerWithCcCtx(ccCtx)
+	lg := core.LoggerWithCcCtx(ccCtx, fh.dl)
 
 	// 未认证连接：只处理单个 Conn 帧
 	if !connAuthed {

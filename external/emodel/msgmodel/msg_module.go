@@ -27,6 +27,9 @@ type SubCmdType uint16
 const (
 	// 邀请入群
 	SubCmdGroupInvited SubCmdType = 1001
+
+	// 设置群名称
+	SubCmdGroupSettingName SubCmdType = 1002
 )
 
 type SenderInfo struct {
@@ -71,6 +74,16 @@ func BuildGroupInvitedCmdMsg(inviteContent map[string]any) *MsgContent {
 		Content: map[string]any{
 			"subCmd":        SubCmdGroupInvited,
 			"inviteContent": inviteContent,
+		},
+	}
+}
+
+func BuildGroupSettingCmdMsg(settingContent map[string]any) *MsgContent {
+	return &MsgContent{
+		Type: CmdType,
+		Content: map[string]any{
+			"subCmd":         SubCmdGroupSettingName,
+			"settingContent": settingContent,
 		},
 	}
 }

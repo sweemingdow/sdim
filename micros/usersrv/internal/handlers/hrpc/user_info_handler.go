@@ -18,26 +18,26 @@ const (
 
 type UserInfoHandler struct {
 	uis infosrv.UserInfoService
+	dl  *mylog.DecoLogger
 }
 
 func NewUserInfoHandler(uis infosrv.UserInfoService) *UserInfoHandler {
-	mylog.AddModuleLogger(UserInfoLogger)
-
 	return &UserInfoHandler{
 		uis: uis,
+		dl:  mylog.NewDecoLogger("userInfoHandlerLogger"),
 	}
 }
 
-func (uih *UserInfoHandler) HandleUserState(c *arpc.Context) {
+func (h *UserInfoHandler) HandleUserState(c *arpc.Context) {
 	var req rpccall.RpcReqWrapper[rpcuser.UserStateReq]
 	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
 		return
 	}
 
-	lg := rpccall.LoggerWrapWithReq(req, mylog.GetLogger(UserInfoLogger))
+	lg := rpccall.LoggerWrapWithReq(req, h.dl)
 	lg.Debug().Any("req", req).Msg("handle user state start")
 
-	state, err := uih.uis.UserState(req.Req.Uid)
+	state, err := h.uis.UserState(req.Req.Uid)
 
 	if err != nil {
 		if err == infosrv.UserNotExistsErr {
@@ -60,16 +60,16 @@ func (uih *UserInfoHandler) HandleUserState(c *arpc.Context) {
 	}
 }
 
-func (uih *UserInfoHandler) HandleUsersUnitInfo(c *arpc.Context) {
+func (h *UserInfoHandler) HandleUsersUnitInfo(c *arpc.Context) {
 	var req rpccall.RpcReqWrapper[rpcuser.UsersUnitInfoReq]
 	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
 		return
 	}
 
-	lg := rpccall.LoggerWrapWithReq(req, mylog.GetLogger(UserInfoLogger))
+	lg := rpccall.LoggerWrapWithReq(req, h.dl)
 	lg.Debug().Any("req", req).Msg("handle users unit info start")
 
-	uid2item, err := uih.uis.UsersUnitInfo(req.Req.Uids)
+	uid2item, err := h.uis.UsersUnitInfo(req.Req.Uids)
 
 	if err != nil {
 		lg.Error().Stack().Err(err).Msg("handle users unit info failed")
@@ -96,16 +96,16 @@ func (uih *UserInfoHandler) HandleUsersUnitInfo(c *arpc.Context) {
 	}
 }
 
-func (uih *UserInfoHandler) HandleUserUnitInfo(c *arpc.Context) {
+func (h *UserInfoHandler) HandleUserUnitInfo(c *arpc.Context) {
 	var req rpccall.RpcReqWrapper[rpcuser.UserUnitInfoReq]
 	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
 		return
 	}
 
-	lg := rpccall.LoggerWrapWithReq(req, mylog.GetLogger(UserInfoLogger))
+	lg := rpccall.LoggerWrapWithReq(req, h.dl)
 	lg.Debug().Any("req", req).Msg("handle user unit info start")
 
-	info, err := uih.uis.UserUnitInfo(req.Req.Uid)
+	info, err := h.uis.UserUnitInfo(req.Req.Uid)
 
 	if err != nil {
 		if err == infosrv.UserNotExistsErr {

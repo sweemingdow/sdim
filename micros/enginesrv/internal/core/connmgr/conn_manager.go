@@ -66,6 +66,8 @@ type connManager struct {
 
 	// ping丢失次数
 	pingLostTimes int
+
+	dl *mylog.DecoLogger
 }
 
 func NewConnManager(esCap, strip int,
@@ -103,6 +105,7 @@ func NewConnManager(esCap, strip int,
 		authTimeout:   authTimeout,
 		pingInterval:  pingInterval,
 		pingLostTimes: pingLostTimes,
+		dl:            mylog.NewDecoLogger("convMgrLogger"),
 	}
 
 	go cm.startDqTaker()
@@ -363,7 +366,7 @@ func (cm *connManager) GetUsersConns(uids []string) map[string][]gnet.Conn {
 }
 
 func (cm *connManager) execAuthExpireCheckTask(item connDelayItem) {
-	lg := mylog.AppLogger().With().Str("conn_id", item.connId).Logger()
+	lg := cm.dl.GetLogger().With().Str("conn_id", item.connId).Logger()
 	lg.Trace().Msg("conn auth expire time reached")
 
 	conn, ok := cm.connId2conn.Get(item.connId)
@@ -383,7 +386,7 @@ func (cm *connManager) execAuthExpireCheckTask(item connDelayItem) {
 }
 
 func (cm *connManager) execPingExpireCheckTask(item connDelayItem) {
-	lg := mylog.AppLogger().With().Str("conn_id", item.connId).Logger()
+	lg := cm.dl.GetLogger().With().Str("conn_id", item.connId).Logger()
 	lg.Trace().Msg("conn ping expire time reached")
 
 	conn, ok := cm.connId2conn.Get(item.connId)

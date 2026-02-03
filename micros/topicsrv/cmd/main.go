@@ -41,7 +41,7 @@ func main() {
 	booter.AddComponentStageOption(boot.WithNacosRegistry())
 
 	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
-		lg := mylog.AppLogger()
+		lg := mylog.GetDecoLogger()
 		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
 
 		return c.JSON(wrapper.GeneralErr(err))

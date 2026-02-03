@@ -19,6 +19,7 @@ import (
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/handlers/hrpc"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/repostories/msgrepo"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/routers"
+	"github.com/sweemingdow/sdim/pkg/wrapper"
 )
 
 func main() {
@@ -36,9 +37,9 @@ func main() {
 
 	// http服务
 	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
-		lg := mylog.AppLogger()
+		lg := mylog.GetDecoLogger()
 		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
-		return c.SendString(err.Error())
+		return c.JSON(wrapper.GeneralErr(err))
 	}))
 
 	// rpc服务

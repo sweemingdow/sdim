@@ -12,30 +12,30 @@ import (
 type msgForwardHandler struct {
 	connMgr core.ConnManager
 	frCodec fcodec.FrameCodec
+	dl      *mylog.DecoLogger
 }
 
 func NewMsgForwardHandler(connMgr core.ConnManager, frCodec fcodec.FrameCodec) nsq.Handler {
 	mfh := &msgForwardHandler{
 		connMgr: connMgr,
 		frCodec: frCodec,
+		dl:      mylog.NewDecoLogger("msgForwardHandlerLogger"),
 	}
 
 	return mfh
 }
 
 func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
-	lg := mylog.AppLogger()
-
 	var msp msgpd.MsgForwardPayload
 
 	err := json.Parse(message.Body, &msp)
 	if err != nil {
-		lg.Error().Stack().Err(err).Msg("parse forward msg payload failed")
+		mfh.dl.Error().Stack().Err(err).Msg("parse forward msg payload failed")
 		// give up
 		return nil
 	}
 
-	lg = lg.With().
+	lg := mfh.dl.GetLogger().With().
 		Str("req_id", msp.ReqId).
 		Str("conv_id", msp.ConvId).
 		Int64("msg_id", msp.MsgId).

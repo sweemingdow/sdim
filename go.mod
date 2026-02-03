@@ -16,7 +16,7 @@ require (
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/rs/zerolog v1.34.0
 	github.com/sweemingdow/delay-queue v0.0.1
-	github.com/sweemingdow/gmicro_pkg v0.0.0-20251206062603-460ce6a67bbb
+	github.com/sweemingdow/gmicro_pkg v0.0.1
 	golang.org/x/sync v0.18.0
 )
 
@@ -74,7 +74,6 @@ require (
 	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/sony/sonyflake/v2 v2.2.0 // indirect
-	github.com/sweemingdow/log_remote_writer v0.0.3 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.68.0 // indirect

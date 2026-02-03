@@ -14,29 +14,29 @@ import (
 type convAddHandler struct {
 	connMgr core.ConnManager
 	frCodec fcodec.FrameCodec
+	dl      *mylog.DecoLogger
 }
 
 func NewConvAddHandler(connMgr core.ConnManager, frCodec fcodec.FrameCodec) nsq.Handler {
 	mfh := &convAddHandler{
 		connMgr: connMgr,
 		frCodec: frCodec,
+		dl:      mylog.NewDecoLogger("convAddHandlerLogger"),
 	}
 
 	return mfh
 }
 
 func (mfh *convAddHandler) HandleMessage(message *nsq.Message) error {
-	lg := mylog.AppLogger()
-
 	var pd convpd.ConvAddEventPayload
 	err := json.Parse(message.Body, &pd)
 	if err != nil {
-		lg.Error().Stack().Err(err).Msg("parse conv add payload failed")
+		mfh.dl.Error().Stack().Err(err).Msg("parse conv add payload failed")
 		// give up
 		return nil
 	}
 
-	lg = lg.With().
+	lg := mfh.dl.GetLogger().With().
 		Str("conv_id", pd.ConvId).
 		Logger()
 

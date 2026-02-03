@@ -362,8 +362,6 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/sweemingdow/delay-queue v0.0.1 h1:qJyH853reQQ/9cFe4h3IKXQaTcH2OLvS77eexjzph5c=
 github.com/sweemingdow/delay-queue v0.0.1/go.mod h1:8o8SlbjrSQZfrLEXRu6QJCel9AouOWiDCPX58GTEpsM=
-github.com/sweemingdow/log_remote_writer v0.0.3 h1:Udvli6uDPTMXhzE1ansPRmuk+0/yq4HKIzihYgCuNMA=
-github.com/sweemingdow/log_remote_writer v0.0.3/go.mod h1:DImNd4+Bz3LZNp9vqYf7Sd7Wmr3DvS6sonxntVtw/94=
 github.com/tjfoc/gmsm v1.3.2/go.mod h1:HaUcFuY0auTiaHB9MHFGCPx5IaLhTUd2atbCFBQXn9w=
 github.com/tjfoc/gmsm v1.4.1 h1:aMe1GlZb+0bLjn+cKTPEvvn9oUEBlJitaZiiBwsbgho=
 github.com/tjfoc/gmsm v1.4.1/go.mod h1:j4INPkHWMrhJb38G+J6W4Tw0AbuN8Thu3PbdVYhVcTE=

@@ -2,7 +2,6 @@ package msgreceive
 
 import (
 	"github.com/nsqio/go-nsq"
-	"github.com/panjf2000/ants/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
@@ -14,6 +13,7 @@ import (
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel/msgpojo"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/repostories/msgrepo"
+	"github.com/sweemingdow/sdim/pkg/async"
 	"time"
 )
 
@@ -24,51 +24,39 @@ const (
 type msgReceiveHandler struct {
 	mr           msgrepo.MsgRepository
 	userProvider rpcuser.UserInfoRpcProvider
-	pool         *ants.Pool
+	ah           async.AsyncHandler
 	nsqPd        *cnsq.NsqProducer
+	dl           *mylog.DecoLogger
 }
 
 func NewMsgReceiveHandler(mr msgrepo.MsgRepository, userProvider rpcuser.UserInfoRpcProvider, nsqPd *cnsq.NsqProducer) nsq.Handler {
-	options := ants.Options{
-		ExpiryDuration:   10 * time.Second,
-		Nonblocking:      false,
-		MaxBlockingTasks: 50000,
-		//PreAlloc:         true,
-		PanicHandler: func(a any) {
-			lg := mylog.AppLogger()
-			lg.Error().Stack().Msgf("msg receive handle panic, err:%v", a)
-		},
-	}
-
-	p, e := ants.NewPool(4096, ants.WithOptions(options))
-
-	if e != nil {
-		panic(e)
-	}
-
 	return &msgReceiveHandler{
 		mr:           mr,
 		userProvider: userProvider,
-		pool:         p,
-		nsqPd:        nsqPd,
+		ah: async.NewCallerRunHandler(async.CallerRunOptions{
+			CoreWorkers:      8,
+			MaxWorkers:       128,
+			MaxWaitQueueSize: 2048,
+			MaxIdleTimeout:   30 * time.Second,
+		}),
+		nsqPd: nsqPd,
+		dl:    mylog.NewDecoLogger("msgReceiveLogger"),
 	}
 }
 
 func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 	message.DisableAutoResponse()
 
-	lg := mylog.AppLogger()
-
 	var msgPd msgpd.MsgSendReceivePayload
 	err := json.Parse(message.Body, &msgPd)
 	if err != nil {
-		lg.Error().Stack().Err(err).Msg("parse msg payload failed")
+		mrh.dl.Error().Stack().Err(err).Msg("parse msg payload failed")
 		// 不需要重试了
 		message.Finish()
 		return nil
 	}
 
-	lg = lg.With().
+	lg := mrh.dl.GetLogger().With().
 		Str("conv_id", msgPd.ConvId).
 		Int64("msg_id", msgPd.MsgId).
 		Str("req_id", msgPd.ReqId).
@@ -82,7 +70,7 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 		return nil
 	}
 
-	err = mrh.pool.Submit(func() {
+	err = mrh.ah.Submit(func() {
 		var sendInfo msgmodel.SenderInfo
 		if chatmodel.IsUserSend(msgPd.SenderType) {
 			resp, ie := mrh.userProvider.UserUnitInfo(rpccall.CreateIdReq(msgPd.ReqId, rpcuser.UserUnitInfoReq{Uid: msgPd.Sender}))

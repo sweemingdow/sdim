@@ -22,10 +22,15 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/nsqsend"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
+	"github.com/sweemingdow/sdim/pkg/async"
 	"github.com/sweemingdow/sdim/pkg/wrapper"
 	"strings"
 	"sync/atomic"
 	"time"
+)
+
+const (
+	groupHttpHandleLoggerName = "groupHttpHandleLogger"
 )
 
 type GroupHttpHandler struct {
@@ -37,6 +42,8 @@ type GroupHttpHandler struct {
 	done         chan struct{}
 	doneChan     chan *nsq.ProducerTransaction
 	closed       atomic.Bool
+	ah           async.AsyncHandler
+	dl           *mylog.DecoLogger
 }
 
 func NewGroupHttpHandler(
@@ -54,6 +61,13 @@ func NewGroupHttpHandler(
 		userProvider: userProvider,
 		doneChan:     make(chan *nsq.ProducerTransaction, 10),
 		done:         make(chan struct{}),
+		ah: async.NewCallerRunHandler(async.CallerRunOptions{
+			CoreWorkers:      2,
+			MaxWorkers:       16,
+			MaxWaitQueueSize: 512,
+			MaxIdleTimeout:   30 * time.Second,
+		}),
+		dl: mylog.NewDecoLogger(groupHttpHandleLoggerName),
 	}
 
 	go ghh.receiveMqSendAsyncResult()
@@ -96,9 +110,7 @@ func (h *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		}
 	}
 
-	lg := mylog.AppLogger()
-
-	lg.Debug().Msgf("handle start group chat, req=%+v", req)
+	h.dl.Debug().Msgf("handle start group chat, req=%+v", req)
 
 	// rpc查用户信息
 	rpcResp, err := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
@@ -181,8 +193,7 @@ func (h *GroupHttpHandler) HandleStartGroupChat(c *fiber.Ctx) error {
 		//FollowMsg:      inviteMsg,
 	}
 
-	lg = lg.With().Str("conv_id", convId).Logger()
-
+	lg := h.dl.GetLogger().With().Str("conv_id", convId).Logger()
 	lg.Debug().Msgf("group created, conv add event will be published, pd=%+v", pd)
 
 	h.ms.SendConvAddEvent(pd, lg)
@@ -296,6 +307,13 @@ func (h *GroupHttpHandler) HandlerSettingGroupName(c *fiber.Ctx) error {
 		return errors.New("groupName is required")
 	}
 
+	uid := c.Query("uid")
+	if uid == "" {
+		return errors.New("uid is required")
+	}
+
+	convId := chatmodel.GenerateGroupChatConvId(groupNo)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -304,7 +322,72 @@ func (h *GroupHttpHandler) HandlerSettingGroupName(c *fiber.Ctx) error {
 		return err
 	}
 
-	// todo 修改会话title, 发送cmd消息, {0}修改群名称为:{groupName}
+	groupUids, err := h.gr.FindGroupMebUids(ctx, groupNo)
+	if err != nil {
+		return err
+	}
+
+	// 修改会话title
+	h.cm.OnGroupDataChanged(core.OnGroupDataChangedParam{
+		GroupNo:   groupNo,
+		Uids:      groupUids,
+		GroupName: &groupName,
+	})
+
+	err = h.ah.Submit(func() {
+		resp, ie := h.userProvider.UserUnitInfo(rpccall.CreateReq(rpcuser.UserUnitInfoReq{Uid: uid}))
+		if ie != nil {
+
+		}
+
+		userInfo, ie := resp.OkOrErr()
+		if ie != nil {
+
+		}
+
+		mills := time.Now().UnixMilli()
+		// 发送cmd消息, {0}修改群名称为:{groupName}
+		groupSettingFmt, fmtItems := h.buildGroupSettingInfoFmt(*userInfo, groupName)
+		settingMsg := &msgmodel.LastMsg{
+			MsgId: sfid.Next(),
+			SenderInfo: msgmodel.SenderInfo{
+				SenderType: chatmodel.SysCmdSender,
+			},
+			Content: msgmodel.BuildGroupSettingCmdMsg(
+				map[string]any{
+					"settingFmtItems": fmtItems,
+					"settingHint":     groupSettingFmt,
+				},
+			),
+		}
+		ie = h.ms.SendMsg(
+			&msgpd.MsgSendReceivePayload{
+				ConvId:           chatmodel.GenerateGroupChatConvId(groupNo),
+				ConvLastActiveTs: mills,
+				MsgId:            settingMsg.MsgId,
+				MsgSeq:           0,
+				ChatType:         chatconst.GroupChat,
+				SenderType:       chatmodel.SysCmdSender,
+				Sender:           chatmodel.SysAutoSend,
+				Receiver:         groupNo,
+				Members:          groupUids,
+				SendTs:           mills,
+				MsgContent:       settingMsg.Content,
+			},
+			h.doneChan,
+			[]any{
+				convId,
+				settingMsg.MsgId,
+				mills,
+			},
+		)
+
+		if ie != nil {
+
+		}
+
+		// 发送会话变更通知
+	})
 
 	if ok {
 		return c.JSON(wrapper.JustOk())
@@ -337,19 +420,38 @@ func (h *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.UnitI
 	return appender.String(), uidNicknames
 }
 
+// {0}修改群名称为:{groupName}
+func (h *GroupHttpHandler) buildGroupSettingInfoFmt(modifyUserInfo rpcuser.UnitInfoRespItem, groupName string) (string, []chatmodel.UidNickname) {
+	uidNicknames := []chatmodel.UidNickname{
+		{
+			Uid:      modifyUserInfo.Uid,
+			Nickname: modifyUserInfo.Nickname,
+		},
+	}
+
+	fmtInfo := fmt.Sprintf("{0}修改群名称为 %s", groupName)
+
+	return fmtInfo, uidNicknames
+}
+
 func (h *GroupHttpHandler) OnCreated(_ chan<- error) {
 
 }
 
-func (h *GroupHttpHandler) OnDispose(_ context.Context) error {
+func (h *GroupHttpHandler) OnDispose(ctx context.Context) error {
 	if !h.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 
-	lg := mylog.AppLogger()
+	lg := mylog.GetStopMarkLogger()
 	lg.Debug().Msg("group http handler stop now")
 
 	close(h.done)
+
+	err := h.ah.Shutdown(ctx)
+	if err != nil {
+		return err
+	}
 
 	lg.Info().Msg("group http handler stopped successfully")
 
@@ -381,9 +483,8 @@ func (h *GroupHttpHandler) receiveMqSendAsyncResult() {
 				continue
 			}
 
-			lg := mylog.AppLogger()
 			if pt.Error != nil {
-				lg.Error().
+				h.dl.Error().
 					Stack().
 					Str("conv_id", convId).
 					Any("args", pt.Args).
@@ -394,7 +495,7 @@ func (h *GroupHttpHandler) receiveMqSendAsyncResult() {
 
 			h.cm.UpdateGroupChatAfterCreatedEventSent(convId, msgId, lastTs)
 
-			lg.Trace().Str("conv_id", convId).Int64("msg_id", msgId).Msg("group created, mq msg async send success")
+			h.dl.Trace().Str("conv_id", convId).Int64("msg_id", msgId).Msg("group created, mq msg async send success")
 		}
 	}
 }

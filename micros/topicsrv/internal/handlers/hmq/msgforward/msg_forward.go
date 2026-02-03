@@ -11,33 +11,38 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 )
 
+const (
+	msgForwardHandleLoggerName = "msgForwardHandleLogger"
+)
+
 type msgForwardHandler struct {
 	cm    core.ConvManager
 	nsqPd *cnsq.NsqProducer
+	dl    *mylog.DecoLogger
 }
 
 func NewMsgForwardHandler(cm core.ConvManager, nsqPd *cnsq.NsqProducer) nsq.Handler {
 	mfh := &msgForwardHandler{
 		cm:    cm,
 		nsqPd: nsqPd,
+		dl:    mylog.NewDecoLogger(msgForwardHandleLoggerName),
 	}
 
 	return mfh
 }
 
-func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
-	lg := mylog.AppLogger()
-
+func (h *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 	var msp msgpd.MsgForwardPayload
 
 	err := json.Parse(message.Body, &msp)
 	if err != nil {
-		lg.Error().Stack().Err(err).Msg("parse forward msg payload failed")
+		h.dl.Error().Stack().Err(err).Msg("parse forward msg payload failed")
 		// give up
 		return nil
 	}
 
-	lg = lg.With().
+	lg := h.dl.GetLogger().
+		With().
 		Str("req_id", msp.ReqId).
 		Str("conv_id", msp.ConvId).
 		Int64("msg_id", msp.MsgId).
@@ -45,7 +50,7 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 
 	lg.Debug().Msgf("receive msg for forward, msg=%+v, conent=%+v", *msp.Msg, *msp.Msg.Content)
 
-	msr := mfh.cm.OnMsgStored(&msp)
+	msr := h.cm.OnMsgStored(&msp)
 
 	lg.Trace().Msgf("on msg stored completed, msr%+v", msr)
 
@@ -67,7 +72,7 @@ func (mfh *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 		return nil
 	}
 
-	err = mfh.nsqPd.PublishAsync(
+	err = h.nsqPd.PublishAsync(
 		cnsq.PublishParam{
 			Topic:   nsqconst.ConvUpdateTopic,
 			Payload: payloads,

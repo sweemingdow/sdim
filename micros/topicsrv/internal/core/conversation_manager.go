@@ -111,6 +111,14 @@ type MsgStoredResult struct {
 	LastActiveTs    int64
 }
 
+type OnGroupDataChangedParam struct {
+	GroupNo   string
+	Uids      []string
+	GroupName *string
+	GroupIcon *string
+	Remark    *string
+}
+
 // 会话管理器
 type ConvManager interface {
 	graceful.Gracefully
@@ -129,6 +137,9 @@ type ConvManager interface {
 
 	// 群聊会话
 	UpsertGroupChatConv(convId, groupNo, icon, title string, members []string) bool
+
+	// 群资料更新
+	OnGroupDataChanged(param OnGroupDataChangedParam) bool
 
 	// 群聊创建发送消息成功后
 	UpdateGroupChatAfterCreatedEventSent(convId string, msgId, lastActiveTs int64)

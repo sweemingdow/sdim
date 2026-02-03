@@ -11,26 +11,30 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 )
 
+const (
+	topicHandleLoggerName = "topicHandleLogger"
+)
+
 type TopicHandler struct {
 	cm core.ConvManager
+	dl *mylog.DecoLogger
 }
 
 func NewTopicHandler(cm core.ConvManager) *TopicHandler {
 	return &TopicHandler{
 		cm: cm,
+		dl: mylog.NewDecoLogger(topicHandleLoggerName),
 	}
 }
 
-func (th *TopicHandler) HandleMsgComing(c *arpc.Context) {
-	lg := mylog.AppLogger()
-
+func (h *TopicHandler) HandleMsgComing(c *arpc.Context) {
 	var req rpccall.RpcReqWrapper[rpctopic.MsgComingReq]
 	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
 		return
 	}
 
-	qlg := rpccall.LoggerWrapWithReq(req, lg)
-	qlg.Debug().Msg("receive msg coming")
+	lg := rpccall.LoggerWrapWithReq(req, h.dl)
+	lg.Debug().Msg("receive msg coming")
 
 	var rr = req.Req
 	var (
@@ -63,11 +67,10 @@ func (th *TopicHandler) HandleMsgComing(c *arpc.Context) {
 	param := core.MsgComingParamFrom(rr, req.ReqId)
 	param.IsConvType = isConv
 
-	rst := th.cm.OnMsgComing(param)
+	rst := h.cm.OnMsgComing(param)
 
 	if rst.Err != nil {
-		plg := rpccall.LoggerWrapWithReq(req, lg)
-		plg.Error().Stack().Err(rst.Err).Msg("msg coming handle failed")
+		lg.Error().Stack().Err(rst.Err).Msg("msg coming handle failed")
 
 		var resp = rpccall.ErrGeneral(rst.Err.Error(), core.MsgComingResultTo(rst, param.ClientUniqueId))
 		srpc.WriteLoggedIfError(c, resp)
@@ -75,8 +78,8 @@ func (th *TopicHandler) HandleMsgComing(c *arpc.Context) {
 		var resp = rpccall.Ok(core.MsgComingResultTo(rst, param.ClientUniqueId))
 
 		if ok := srpc.WriteLoggedIfError(c, resp); ok {
-			plg := rpccall.LoggerWrapWithResp(req.ReqId, resp, lg)
-			plg.Trace().Msg("msg coming handle completed")
+			lg = lg.With().Any("rpc_resp", resp).Logger()
+			lg.Trace().Msg("msg coming handle completed")
 		}
 	}
 

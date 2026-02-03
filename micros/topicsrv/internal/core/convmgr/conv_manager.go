@@ -36,6 +36,10 @@ func init() {
 	sfid.Setting(false)
 }
 
+const (
+	convMgrLoggerName = "convMgrLogger"
+)
+
 type convManager struct {
 	// 会话id -> 会话
 	//convId2items *haxmap.Map[string, *core.Conversation]
@@ -62,6 +66,7 @@ type convManager struct {
 	sfg          singleflight.Group
 	ms           *nsqsend.MsgSender
 	gm           core.GroupManager
+	dl           *mylog.DecoLogger
 }
 
 func NewConvManager(esCap, strip, msgCap int,
@@ -89,6 +94,7 @@ func NewConvManager(esCap, strip, msgCap int,
 		msgCap:        msgCap,
 		ms:            ms,
 		gm:            gm,
+		dl:            mylog.NewDecoLogger(convMgrLoggerName),
 	}
 
 	go cm.receiveMqSendAsyncResult()
@@ -241,7 +247,7 @@ func (cm *convManager) RecentlyConvList(uid string) []*core.ConvListItem {
 }
 
 func (cm *convManager) SyncHotConvList(uid string) []*core.ConvListItem {
-	lg := mylog.AppLogger().With().Str("uid", uid).Logger()
+	lg := cm.dl.GetLogger()
 
 	lg.Debug().Msgf("start sync hot conv list")
 
@@ -266,7 +272,7 @@ func (cm *convManager) SyncHotConvList(uid string) []*core.ConvListItem {
 	// redis中捞会话
 	convTrees, err := cm.cr.GetUserConvTrees(ctx, uid, convIds)
 	if err != nil {
-		lg.Error().Str("uid", uid).Stack().Err(err).Msg("find conv tree failed without mem in sync")
+		cm.dl.Error().Str("uid", uid).Stack().Err(err).Msg("find conv tree failed without mem in sync")
 		return make([]*core.ConvListItem, 0)
 	}
 
@@ -337,7 +343,7 @@ func (cm *convManager) SyncHotConvList(uid string) []*core.ConvListItem {
 }
 
 func (cm *convManager) ClearUnread(convId, uid string) error {
-	lg := mylog.AppLogger().With().Str("uid", uid).Str("conv_id", convId).Logger()
+	lg := cm.dl.GetLogger().With().Str("uid", uid).Str("conv_id", convId).Logger()
 	lg.Trace().Msgf("start clear unread")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
@@ -348,7 +354,6 @@ func (cm *convManager) ClearUnread(convId, uid string) error {
 		return err
 	}
 
-	lg = mylog.AppLogger()
 	lg.Debug().Int64("seq", seq).Msg("clear unread count success")
 
 	_, _ = cm.uidSegLock.WithLock(
@@ -410,10 +415,9 @@ func (cm *convManager) UpsertGroupChatConv(convId, groupNo, icon, title string, 
 				convWrap, ok := cm.uid2convItems[mebUid]
 				lock.RUnlock()
 
-				lock.Lock()
-				defer lock.Unlock()
-
 				if !ok {
+					lock.Lock()
+
 					// convWrap不存在, 先初始化
 					convWrap = &core.MemberConvWrap{
 						ConvId2Item: make(map[string]*core.MemberConv, 100),
@@ -421,7 +425,12 @@ func (cm *convManager) UpsertGroupChatConv(convId, groupNo, icon, title string, 
 					}
 
 					cm.uid2convItems[mebUid] = convWrap
+
+					lock.Unlock()
 				}
+
+				lock.Lock()
+				defer lock.Unlock()
 
 				mebConv, ok := convWrap.ConvId2Item[convId]
 				if ok {
@@ -496,6 +505,39 @@ func (cm *convManager) UpdateGroupChatAfterCreatedEventSent(convId string, msgId
 			return nil, nil
 		},
 	)
+}
+
+func (cm *convManager) OnGroupDataChanged(param core.OnGroupDataChangedParam) bool {
+	if len(param.Uids) == 0 {
+		return false
+	}
+
+	convId := chatmodel.GenerateGroupChatConvId(param.GroupNo)
+
+	for _, uid := range param.Uids {
+		_, _ = cm.uidSegLock.WithLock(
+			uid,
+			func() (any, error) {
+				if convWrap, ok := cm.uid2convItems[uid]; ok {
+					if mebWrap, ok := convWrap.ConvId2Item[convId]; ok {
+						if param.GroupName != nil {
+							mebWrap.Title = *param.GroupName
+						}
+
+						if param.GroupIcon != nil {
+							mebWrap.Icon = *param.GroupIcon
+						}
+
+						if param.Remark != nil {
+							mebWrap.Remark = *param.Remark
+						}
+					}
+				}
+				return nil, nil
+			})
+	}
+
+	return true
 }
 
 type convListResult struct {
@@ -615,8 +657,6 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Second)
 	defer cancel()
 
-	lg := mylog.AppLogger()
-
 	// 处理会话
 	chrVal, convErr := cm.convSegLock.WithLockManual(
 		convId,
@@ -652,7 +692,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 			// 会话记录存在
 			if conv != nil {
 				c = cm.dbConv2local(conv, pa.Sender, pa.Receiver)
-				lg.Trace().Str("conv_id", convId).Msg("conversion was exist in db")
+				cm.dl.Trace().Str("conv_id", convId).Msg("conversion was exist in db")
 
 				cm.convId2items[convId] = c
 
@@ -661,7 +701,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 					convItems: conv.Items,
 				}, nil
 			} else { // 记录不存在
-				lg.Debug().Str("conv_id", convId).Msg("conversion was not exist in db, create and save now")
+				cm.dl.Debug().Str("conv_id", convId).Msg("conversion was not exist in db, create and save now")
 
 				msgQue := &deque.Deque[*msgmodel.MsgItemInMem]{}
 				msgQue.Grow(cm.msgCap)
@@ -867,8 +907,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 			//	}
 			//}
 
-			lg = lg.With().Str("conv_id", convId).Logger()
-
+			lg := cm.dl.GetLogger().With().Str("conv_id", convId).Logger()
 			lg.Debug().Msgf("conv add event will be published, pd=%+v", pd)
 
 			cm.ms.SendConvAddEvent(pd, lg)
@@ -926,7 +965,6 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 
 func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chatconst.ConvType, pa core.MsgComingParam) (int64, error) {
 	grpNo := pa.Receiver
-	lg := mylog.AppLogger()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Second)
 	defer cancel()
@@ -964,7 +1002,7 @@ func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chat
 			// 会话记录存在
 			if conv != nil {
 				c = cm.dbConv2localForGroup(conv)
-				lg.Trace().Str("conv_id", convId).Msg("group conversion was exist in db")
+				cm.dl.Trace().Str("conv_id", convId).Msg("group conversion was exist in db")
 
 				cm.convId2items[convId] = c
 
@@ -974,7 +1012,7 @@ func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chat
 				}, nil
 			} else { // 缓存个空值
 				c = cm.dbConv2localEmptyForGroup(convId)
-				lg.Trace().Str("conv_id", convId).Msg("group conversion was not exist in db, cached empty value")
+				cm.dl.Trace().Str("conv_id", convId).Msg("group conversion was not exist in db, cached empty value")
 
 				cm.convId2items[convId] = c
 
@@ -1339,9 +1377,8 @@ func (cm *convManager) receiveMqSendAsyncResult() {
 				continue
 			}
 
-			lg := mylog.AppLogger()
 			if pt.Error != nil {
-				lg.Error().
+				cm.dl.Error().
 					Stack().
 					Str("conv_id", convId).
 					Int64("msg_seq", msgSeq).
@@ -1413,7 +1450,7 @@ func (cm *convManager) receiveMqSendAsyncResult() {
 					})
 			}
 
-			lg.Trace().Str("conv_id", convId).Int64("msg_seq", msgSeq).Msg("mq msg async send success")
+			cm.dl.Trace().Str("conv_id", convId).Int64("msg_seq", msgSeq).Msg("mq msg async send success")
 		}
 	}
 }

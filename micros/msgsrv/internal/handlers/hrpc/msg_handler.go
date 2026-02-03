@@ -20,22 +20,23 @@ import (
 
 type MsgHandler struct {
 	msgResp msgrepo.MsgRepository
+	dl      *mylog.DecoLogger
 }
 
 func NewMsgHandler(msgResp msgrepo.MsgRepository) *MsgHandler {
 	return &MsgHandler{
 		msgResp: msgResp,
+		dl:      mylog.NewDecoLogger("msgHandlerLogger"),
 	}
 }
 
 func (mh *MsgHandler) HandlerBatchConvRecentlyMsgs(c *arpc.Context) {
-	lg := mylog.AppLogger()
 	var req rpcmsg.BatchConvRecentlyMsgsReq
 	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
 		return
 	}
 
-	lg.Trace().Strs("conv_ids", req.ConvIds).Msg("receive batch conv recently msgs")
+	mh.dl.Trace().Strs("conv_ids", req.ConvIds).Msg("receive batch conv recently msgs")
 
 	if len(req.ConvIds) == 0 {
 		srpc.WriteLoggedIfError(c, rpcmsg.BatchConvRecentlyMsgsResp{

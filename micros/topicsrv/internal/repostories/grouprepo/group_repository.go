@@ -41,6 +41,8 @@ type GroupRepository interface {
 
 	FindGroupItems(ctx context.Context, groupNo string) ([]*chatpojo.GroupItem, error)
 
+	FindGroupMebUids(ctx context.Context, groupNo string) ([]string, error)
+
 	SettingGroupName(ctx context.Context, groupNo, groupName string) (bool, error)
 }
 
@@ -234,6 +236,24 @@ func (gr *groupRepository) SettingGroupName(ctx context.Context, groupNo, groupN
 	}
 
 	return suc, nil
+}
+
+func (gr *groupRepository) FindGroupMebUids(ctx context.Context, groupNo string) ([]string, error) {
+	var uids []string
+	err := gr.sc.WithSess(func(sess *dbr.Session) error {
+		_, ie := sess.Select("uid").From(chatpojo.GroupItem{}.TableName()).Where("group_no = ?", groupNo).LoadContext(ctx, &uids)
+		if ie != nil {
+			return ie
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return uids, nil
 }
 
 func PkgGroupTreeKey(groupNo string) string {
