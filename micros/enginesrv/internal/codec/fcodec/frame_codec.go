@@ -20,16 +20,17 @@ var (
 type FrameType uint8
 
 const (
-	Ping       FrameType = 1  // ping(c2s)
-	Pong       FrameType = 2  // pong(s2c)
-	Conn       FrameType = 3  // 连接(c2s)
-	ConnAck    FrameType = 4  // 连接确认(s2c)
-	Send       FrameType = 5  // 发送消息(c2s)
-	SendAck    FrameType = 6  // 发送消息确认(s2c)
-	Forward    FrameType = 7  // 转发消息(s2c)
-	ForwardAck FrameType = 8  // 收到转发消息确认(c2s)
-	ConvUpdate FrameType = 9  // 收到转发消息确认(c2s)
-	Disconnect FrameType = 10 // 断开连接(服务端主动发起)
+	Ping       FrameType = 1 // ping(c2s)
+	Pong       FrameType = 2 // pong(s2c)
+	Conn       FrameType = 3 // 连接(c2s)
+	ConnAck    FrameType = 4 // 连接确认(s2c)
+	Send       FrameType = 5 // 发送消息(c2s)
+	SendAck    FrameType = 6 // 发送消息确认(s2c)
+	Forward    FrameType = 7 // 转发消息(s2c)
+	ForwardAck FrameType = 8 // 收到转发消息确认(c2s)
+	ConvUpdate FrameType = 9 // 收到转发消息确认(c2s)
+	Notify     FrameType = 10
+	Disconnect FrameType = 100 // 断开连接(服务端主动发起)
 )
 
 var (
@@ -42,6 +43,7 @@ var (
 		SendAck:    "SendAck",
 		Forward:    "Forward",
 		ForwardAck: "ForwardAck",
+		Notify:     "Notify",
 		Disconnect: "Disconnect",
 	}
 )
@@ -156,6 +158,10 @@ func NewForwardFrame(reqId string, bodies []byte) (Frame, error) {
 
 func NewConvUpdateFrame(bodies []byte) Frame {
 	return newS2cFrame(JsonPayload, ConvUpdate, [16]byte{}, bodies)
+}
+
+func NewNotifyFrame(bodies []byte) Frame {
+	return newS2cFrame(JsonPayload, Notify, [16]byte{}, bodies)
 }
 
 func newS2cFrame(pp PayloadProtocolType, ft FrameType, reqId [16]byte, body []byte) Frame {

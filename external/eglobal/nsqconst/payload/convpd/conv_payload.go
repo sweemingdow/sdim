@@ -14,6 +14,17 @@ type ConvLastMsgUpdateEventPayload struct {
 	Uid2UnreadCount map[string]int64   `json:"uid2unreadCount,omitempty"`
 }
 
+type ConvUnitDataUpdatePayload struct {
+	ConvId       string   `json:"convId,omitempty"`
+	Icon         *string  `json:"icon,omitempty"`
+	UpdateReason string   `json:"updateReason,omitempty"` // 变更原因
+	Title        *string  `json:"title,omitempty"`
+	PinTop       *bool    `json:"pinTop,omitempty"`
+	NoDisturb    *bool    `json:"noDisturb,omitempty"`
+	Members      []string `json:"members,omitempty"`
+	Uts          int64    `json:"uts,omitempty"`
+}
+
 type MemberUnitInfo struct {
 	Icon  string
 	Title string

@@ -95,6 +95,8 @@ func main() {
 			groupMgr,
 		)
 
+		tm := csql.NewTransManager(sc)
+
 		nsqFactory := cnsq.NewStaticNsqMsgConsumeFactory()
 		nsqFactory.Register(nsqconst.MsgForwardTopic, msgforward.NewMsgForwardHandler(cm, nsqPd))
 
@@ -109,7 +111,7 @@ func main() {
 
 		convHttpHandler := hhttp.NewConvHttpHandler(cm)
 
-		groupHttpHandler := hhttp.NewGroupHttpHandler(cm, groupRepo, groupMgr, ms, userProvider)
+		groupHttpHandler := hhttp.NewGroupHttpHandler(cm, tm, groupRepo, groupMgr, ms, userProvider, nsqPd)
 		ac.CollectLifecycle("groupHttpHandler", groupHttpHandler)
 
 		return routers.NewTopicServerRouteBinder(

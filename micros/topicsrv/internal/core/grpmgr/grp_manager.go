@@ -3,6 +3,7 @@ package grpmgr
 import (
 	"context"
 	"github.com/sweemingdow/gmicro_pkg/pkg/guc"
+	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
@@ -62,6 +63,16 @@ func (gm *groupManager) OnGroupCreated(grpNo, creator string, uid2role map[strin
 }
 
 func (gm *groupManager) OnSendMsgInGroup(ctx context.Context, grpNo, sender string) (core.CanSendInfo, error) {
+	grpInfo, err := gm.initGroupInfoLazy(ctx, grpNo)
+	if err != nil {
+		var info core.CanSendInfo
+		return info, err
+	}
+
+	return gm.groupIno2canSendInfo(grpInfo, sender), nil
+}
+
+func (gm *groupManager) initGroupInfoLazy(ctx context.Context, grpNo string) (*core.GroupInfo, error) {
 	infoVal, err := gm.segLock.WithLockManual(
 		grpNo,
 		func(lock *sync.RWMutex) (any, error) {
@@ -70,7 +81,7 @@ func (gm *groupManager) OnSendMsgInGroup(ctx context.Context, grpNo, sender stri
 			lock.RUnlock()
 
 			if ok {
-				return gm.groupIno2canSendInfo(grpInfo, sender), nil
+				return grpInfo, nil
 			}
 
 			lock.Lock()
@@ -79,7 +90,7 @@ func (gm *groupManager) OnSendMsgInGroup(ctx context.Context, grpNo, sender stri
 			grpInfo, ok = gm.grpNo2info[grpNo]
 
 			if ok {
-				return gm.groupIno2canSendInfo(grpInfo, sender), nil
+				return grpInfo, nil
 			}
 
 			_grpInfo, ie := gm.gr.FindGroupInfo(ctx, grpNo)
@@ -125,16 +136,40 @@ func (gm *groupManager) OnSendMsgInGroup(ctx context.Context, grpNo, sender stri
 			grpInfo.Owner = ownerUid
 			gm.grpNo2info[grpNo] = grpInfo
 
-			return gm.groupIno2canSendInfo(grpInfo, sender), nil
+			return grpInfo, nil
 		},
 	)
 
 	if err != nil {
-		var info core.CanSendInfo
-		return info, err
+		return nil, err
 	}
 
-	return infoVal.(core.CanSendInfo), nil
+	return infoVal.(*core.GroupInfo), nil
+}
+
+func (gm *groupManager) GetGroupMebUids(ctx context.Context, grpNo string) []string {
+	_, err := gm.initGroupInfoLazy(ctx, grpNo)
+	if err != nil {
+		return make([]string, 0)
+	}
+
+	uidsVal, _ := gm.segLock.WithLock(
+		grpNo,
+		func() (any, error) {
+			// copy
+			info, ok := gm.grpNo2info[grpNo]
+			if !ok {
+				return nil, nil
+			}
+
+			return umap.KeyToSli(info.Meb2item), nil
+		})
+
+	if uids, ok := uidsVal.([]string); ok {
+		return uids
+	}
+
+	return make([]string, 0)
 }
 
 func (gm *groupManager) groupIno2canSendInfo(grpInfo *core.GroupInfo, sender string) core.CanSendInfo {

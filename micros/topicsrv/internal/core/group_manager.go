@@ -37,4 +37,6 @@ type GroupManager interface {
 	OnGroupCreated(grpNo, creator string, uid2role map[string]chatmodel.GroupRole)
 
 	OnSendMsgInGroup(ctx context.Context, grpNo, sender string) (CanSendInfo, error)
+
+	GetGroupMebUids(ctx context.Context, grpNo string) []string
 }

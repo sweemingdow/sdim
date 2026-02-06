@@ -74,7 +74,7 @@ func (h *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 
 	err = h.nsqPd.PublishAsync(
 		cnsq.PublishParam{
-			Topic:   nsqconst.ConvUpdateTopic,
+			Topic:   nsqconst.ConvMsgUpdateTopic,
 			Payload: payloads,
 		},
 		nil,
@@ -82,7 +82,7 @@ func (h *msgForwardHandler) HandleMessage(message *nsq.Message) error {
 	)
 
 	if err != nil {
-		lg.Error().Stack().Err(err).Msgf("publish to %s failed, content=%+v", nsqconst.ConvUpdateTopic, *msp.Msg.Content)
+		lg.Error().Stack().Err(err).Msgf("publish to %s failed, content=%+v", nsqconst.ConvMsgUpdateTopic, *msp.Msg.Content)
 		// ignore it
 		return nil
 	}

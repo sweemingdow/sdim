@@ -2,6 +2,7 @@ package grouprepo
 
 import (
 	"context"
+	"errors"
 	"github.com/gocraft/dbr/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
@@ -44,6 +45,16 @@ type GroupRepository interface {
 	FindGroupMebUids(ctx context.Context, groupNo string) ([]string, error)
 
 	SettingGroupName(ctx context.Context, groupNo, groupName string) (bool, error)
+
+	SettingGroupBak(ctx context.Context, uid, groupNo, groupBak string) (bool, error)
+
+	SettingGroupNickname(ctx context.Context, uid, groupNo, nickname string) (bool, error)
+
+	AddMembers(ctx context.Context, uid, groupNo string, members []string) (bool, error)
+
+	GetRoleInGroup(ctx context.Context, groupNo string, uid string, tx *dbr.Tx) (chatmodel.GroupRole, error)
+
+	RemoveMembers(ctx context.Context, tx *dbr.Tx, groupNo string, members []string) ([]string, error)
 }
 
 type groupRepository struct {
@@ -219,6 +230,27 @@ func (gr *groupRepository) SettingGroupName(ctx context.Context, groupNo, groupN
 			}
 			rows, _ := rst.RowsAffected()
 			suc = rows == 1
+			if !suc {
+				return errors.New("modify group name failed, groupNo=" + groupNo)
+			}
+
+			//rst, ie = tx.Update(chatpojo.ConvItem{}.TableName()).Set("conv_title", groupName).Where("relation_id = ?", groupNo).Exec()
+			//if ie != nil {
+			//	return ie
+			//}
+			//
+			//rows, _ = rst.RowsAffected()
+			//suc = rows == 1
+
+			rst, ie = tx.UpdateBySql(
+				`update t_conv_item ci join t_group_item gi on ci.relation_id = gi.group_no and ci.owner_uid = gi.uid set ci.conv_title = ? where gi.group_no = ? and (gi.remark is null or gi.remark = '')`,
+				groupName, groupNo,
+			).Exec()
+
+			if ie != nil {
+				return ie
+			}
+
 			return nil
 		})
 
@@ -232,6 +264,63 @@ func (gr *groupRepository) SettingGroupName(ctx context.Context, groupNo, groupN
 
 	if err != nil {
 		suc = false
+		return suc, err
+	}
+
+	return suc, nil
+}
+
+func (gr *groupRepository) SettingGroupBak(ctx context.Context, uid, groupNo, groupBak string) (bool, error) {
+	var suc bool
+	err := gr.sc.WithTransCtx(
+		ctx,
+		func(_ context.Context, tx *dbr.Tx) error {
+			rst, ie := tx.Update(chatpojo.GroupItem{}.TableName()).Set("remark", groupBak).Where("group_no = ? and uid = ?", groupNo, uid).Exec()
+			if ie != nil {
+				return ie
+			}
+			rows, _ := rst.RowsAffected()
+			suc = rows == 1
+			if !suc {
+				return errors.New("modify group bak failed, groupNo=" + groupNo)
+			}
+
+			rst, ie = tx.Update(chatpojo.ConvItem{}.TableName()).Set("conv_title", groupBak).Where("relation_id = ? and owner_uid = ?",
+				groupNo, uid).Exec()
+			if ie != nil {
+				return ie
+			}
+
+			rows, _ = rst.RowsAffected()
+			suc = rows == 1
+			return nil
+		})
+
+	if err != nil {
+		return suc, err
+	}
+
+	return suc, nil
+}
+
+func (gr *groupRepository) SettingGroupNickname(ctx context.Context, uid, groupNo, nickname string) (bool, error) {
+	var suc bool
+	err := gr.sc.WithTransCtx(
+		ctx,
+		func(_ context.Context, tx *dbr.Tx) error {
+			rst, ie := tx.Update(chatpojo.GroupItem{}.TableName()).Set("meb_nickname", nickname).Where("group_no = ? and uid = ?", groupNo, uid).Exec()
+			if ie != nil {
+				return ie
+			}
+			rows, _ := rst.RowsAffected()
+			suc = rows == 1
+			if !suc {
+				return errors.New("modify group nickname failed, groupNo=" + groupNo)
+			}
+			return nil
+		})
+
+	if err != nil {
 		return suc, err
 	}
 
@@ -254,6 +343,48 @@ func (gr *groupRepository) FindGroupMebUids(ctx context.Context, groupNo string)
 	}
 
 	return uids, nil
+}
+
+func (gr *groupRepository) AddMembers(ctx context.Context, uid, groupNo string, members []string) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupNo string, members []string) ([]string, error) {
+	var existsUids []string
+	var pojo chatpojo.GroupItem
+	// 查询当前已存在的成员
+	_, err := tx.Select("uid").From(pojo.TableName()).
+		Where("group_no = ? and uid in ? and state = ?", groupNo, members).
+		LoadContext(ctx, &existsUids)
+	if err != nil {
+		return existsUids, err
+	}
+
+	if len(existsUids) == 0 {
+		return existsUids, nil
+	}
+
+	_, err = tx.Update(pojo.TableName()).
+		Set("state = ?", chatmodel.GrpMebKicked).
+		Where("group_no = ? and uid in ?", groupNo, existsUids).Exec()
+	if err != nil {
+		return existsUids, err
+	}
+
+	return existsUids, nil
+}
+
+func (gr *groupRepository) GetRoleInGroup(ctx context.Context, groupNo string, uid string, tx *dbr.Tx) (chatmodel.GroupRole, error) {
+	var role int8
+	err := tx.Select("role").From(chatpojo.GroupItem{}.TableName()).
+		Where("group_no = ?  and uid = ? and state = ?", groupNo, uid, chatmodel.GrpMebNormal).
+		LoadOneContext(ctx, &role)
+	if err != nil {
+		return 0, err
+	}
+
+	return chatmodel.GroupRole(role), nil
 }
 
 func PkgGroupTreeKey(groupNo string) string {

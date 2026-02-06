@@ -30,6 +30,12 @@ const (
 
 	// 设置群名称
 	SubCmdGroupSettingName SubCmdType = 1002
+
+	// 添加到群聊
+	SubCmdGroupAddMembers SubCmdType = 1003
+
+	// 移出群聊
+	SubCmdGroupRemoveMembers SubCmdType = 1004
 )
 
 type SenderInfo struct {
@@ -84,6 +90,16 @@ func BuildGroupSettingCmdMsg(settingContent map[string]any) *MsgContent {
 		Content: map[string]any{
 			"subCmd":         SubCmdGroupSettingName,
 			"settingContent": settingContent,
+		},
+	}
+}
+
+func BuildGroupRemoveCmdMsg(removeContent map[string]any) *MsgContent {
+	return &MsgContent{
+		Type: CmdType,
+		Content: map[string]any{
+			"subCmd":        SubCmdGroupRemoveMembers,
+			"removeContent": removeContent,
 		},
 	}
 }
