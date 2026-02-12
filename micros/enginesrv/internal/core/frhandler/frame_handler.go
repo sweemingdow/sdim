@@ -191,7 +191,8 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 					return
 				}
 
-				if !resp.IsOk() {
+				rd, ok := resp.OkOrTake()
+				if !ok {
 					clg.Warn().Msgf("rpc call response not ok, resp=%s", resp)
 
 					fh.writeSendAckFrame(
@@ -213,17 +214,15 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 
 				lg.Debug().Msgf("msg coming return respData:%+v", resp.Data)
 
-				data := resp.Data
-
 				fh.writeSendAckFrame(
 					fcodec.SendFrameAck{
 						RespCode: fcodec.OK,
 						Data: fcodec.SendFrameAckBody{
-							MsgId:          data.MsgId,
-							ClientUniqueId: data.ClientUniqueId,
-							ConvId:         data.ConvId,
-							MsgSeq:         data.MsgSeq,
-							SendTs:         data.SendTs,
+							MsgId:          rd.MsgId,
+							ClientUniqueId: rd.ClientUniqueId,
+							ConvId:         rd.ConvId,
+							MsgSeq:         rd.MsgSeq,
+							SendTs:         rd.SendTs,
 						},
 					},
 					fr,

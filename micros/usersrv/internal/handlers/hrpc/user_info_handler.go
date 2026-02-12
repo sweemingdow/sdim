@@ -59,9 +59,7 @@ func (h *UserInfoHandler) HandleUsersUnitInfo(req rpccall.RpcReqWrapper[rpcuser.
 	uid2item, err := h.uis.UsersUnitInfo(req.Req.Uids)
 
 	if err != nil {
-		lg.Error().Err(err).Msg("handle users unit info failed")
-
-		return nil, rpccall.NewRpcUnpredictableErr(err)
+		return nil, err
 	}
 
 	return umap.Map(

@@ -2,8 +2,9 @@ package grouprepo
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"github.com/gocraft/dbr/v2"
+	"github.com/pkg/errors"
 	"github.com/redis/go-redis/v9"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
@@ -13,6 +14,7 @@ import (
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel/chatpojo"
 	"github.com/sweemingdow/sdim/external/emodel/usermodel"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,7 +52,7 @@ type GroupRepository interface {
 
 	SettingGroupNickname(ctx context.Context, uid, groupNo, nickname string) (bool, error)
 
-	AddMembers(ctx context.Context, uid, groupNo string, members []string) (bool, error)
+	AddMembers(ctx context.Context, tx *dbr.Tx, uid, groupNo string, members []usermodel.UserUnitInfo) (bool, error)
 
 	GetRoleInGroup(ctx context.Context, groupNo string, uid string, tx *dbr.Tx) (chatmodel.GroupRole, error)
 
@@ -196,7 +198,11 @@ func (gr *groupRepository) FindGroupInfo(ctx context.Context, groupNo string) (*
 	})
 
 	if err != nil {
-		return nil, err
+		if err == dbr.ErrNotFound {
+			return nil, err
+		}
+		//return nil, errors.Wrapf(err, "find group info failed, groupNo=%s", groupNo)
+		return nil, errors.WithStack(err)
 	}
 
 	return &pojo, nil
@@ -213,7 +219,7 @@ func (gr *groupRepository) FindGroupItems(ctx context.Context, groupNo string) (
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "find group items failed, groupNo=%s", groupNo)
 	}
 
 	return pojos, nil
@@ -345,9 +351,42 @@ func (gr *groupRepository) FindGroupMebUids(ctx context.Context, groupNo string)
 	return uids, nil
 }
 
-func (gr *groupRepository) AddMembers(ctx context.Context, uid, groupNo string, members []string) (bool, error) {
-	//TODO implement me
-	panic("implement me")
+func (gr *groupRepository) AddMembers(ctx context.Context, tx *dbr.Tx, uid, groupNo string, members []usermodel.UserUnitInfo) (bool, error) {
+	mills := time.Now().UnixMilli()
+	var (
+		placeholders []string
+		args         = make([]any, 0, len(members)*7)
+	)
+
+	for _, mebInfo := range members {
+		placeholders = append(placeholders, "(?,?,?,?,?,?,?)")
+		args = append(args,
+			groupNo,
+			mebInfo.Uid,
+			chatmodel.OrdinaryMeb,
+			mebInfo.Avatar,
+			mebInfo.Nickname,
+			mills,
+			mills,
+		)
+	}
+
+	sql := fmt.Sprintf(
+		`INSERT INTO t_group_item (group_no, uid, role, meb_avatar, meb_nickname, cts, uts) 
+     VALUES %s 
+     ON DUPLICATE KEY UPDATE 
+        meb_avatar = VALUES(meb_avatar),
+        meb_nickname = VALUES(meb_nickname),
+        uts = VALUES(uts)`,
+		strings.Join(placeholders, ","),
+	)
+
+	_, err := tx.InsertBySql(sql, args...).ExecContext(ctx)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+
+	return true, nil
 }
 
 func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupNo string, members []string) ([]string, error) {
@@ -358,7 +397,7 @@ func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupN
 		Where("group_no = ? and uid in ? and state = ?", groupNo, members, chatmodel.GrpMebNormal).
 		LoadContext(ctx, &existsUids)
 	if err != nil {
-		return existsUids, err
+		return existsUids, errors.WithStack(err)
 	}
 
 	if len(existsUids) == 0 {
@@ -369,7 +408,7 @@ func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupN
 		Set("state", chatmodel.GrpMebKicked).
 		Where("group_no = ? and uid in ?", groupNo, existsUids).Exec()
 	if err != nil {
-		return existsUids, err
+		return existsUids, errors.WithStack(err)
 	}
 
 	return existsUids, nil
@@ -381,7 +420,7 @@ func (gr *groupRepository) GetRoleInGroup(ctx context.Context, groupNo string, u
 		Where("group_no = ? and uid = ? and state = ?", groupNo, uid, chatmodel.GrpMebNormal).
 		LoadOneContext(ctx, &role)
 	if err != nil {
-		return 0, err
+		return 0, errors.WithStack(err)
 	}
 
 	return chatmodel.GroupRole(role), nil

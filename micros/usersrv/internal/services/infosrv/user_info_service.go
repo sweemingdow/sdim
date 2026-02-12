@@ -1,9 +1,9 @@
 package infosrv
 
 import (
-	"errors"
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/gocraft/dbr/v2"
+	"github.com/pkg/errors"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
 	"github.com/sweemingdow/sdim/external/emodel/usermodel"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/repostories/inforepo"
@@ -103,7 +103,7 @@ func (uis *userInfoService) UsersUnitInfo(uids []string) (map[string]*inforepo.U
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	batchInfos := m.(map[string]*inforepo.UserUnitInfo)

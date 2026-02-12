@@ -2,13 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/gofiber/fiber/v2"
 	"github.com/sweemingdow/gmicro_pkg/pkg/boot"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/credis"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
 	"github.com/sweemingdow/gmicro_pkg/pkg/decorate/dnacos"
-	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/routebinder"
 	"github.com/sweemingdow/sdim/external/econfig"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst"
@@ -24,13 +22,12 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/convrepo"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/routers"
-	"github.com/sweemingdow/sdim/pkg/wrapper"
 )
 
 func main() {
 	booter := boot.NewBooter()
 
-	booter.AddConfigStageOption(boot.WithLogger(3, 6, func() string {
+	booter.AddConfigStageOption(boot.WithLogger(2, 6, func() string {
 		return ""
 	}))
 
@@ -40,12 +37,7 @@ func main() {
 
 	booter.AddComponentStageOption(boot.WithNacosRegistry())
 
-	booter.AddServerOption(boot.WithHttpServer(func(c *fiber.Ctx, err error) error {
-		lg := mylog.GetDecoLogger()
-		lg.Error().Stack().Err(err).Msgf("fiber handle faield")
-
-		return c.JSON(wrapper.GeneralErr(err))
-	}))
+	booter.AddServerOption(boot.WithHttpServer(nil))
 
 	// 启动rpc服务
 	booter.AddServerOption(boot.WithRpcServer())
