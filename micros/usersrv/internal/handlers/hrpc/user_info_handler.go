@@ -1,12 +1,11 @@
 package hrpc
 
 import (
-	"github.com/lesismal/arpc"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
-	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/sdim/external/emodel/usermodel"
+	"github.com/sweemingdow/sdim/external/erespcode"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/repostories/inforepo"
 	"github.com/sweemingdow/sdim/micros/usersrv/internal/services/infosrv"
@@ -28,59 +27,44 @@ func NewUserInfoHandler(uis infosrv.UserInfoService) *UserInfoHandler {
 	}
 }
 
-func (h *UserInfoHandler) HandleUserState(c *arpc.Context) {
-	var req rpccall.RpcReqWrapper[rpcuser.UserStateReq]
-	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
-		return
-	}
-
-	lg := rpccall.LoggerWrapWithReq(req, h.dl)
+func (h *UserInfoHandler) HandleUserState(req rpccall.RpcReqWrapper[rpcuser.UserStateReq]) (usermodel.UserState, error) {
+	lg := req.BindLogger(h.dl)
 	lg.Debug().Any("req", req).Msg("handle user state start")
 
 	state, err := h.uis.UserState(req.Req.Uid)
 
 	if err != nil {
 		if err == infosrv.UserNotExistsErr {
-			srpc.WriteLoggedIfError(c, rpccall.Ok(usermodel.NotExists))
-			return
+			return 0, erespcode.NewUserNotExistsErr()
 		}
 
-		lg.Error().Stack().Err(err).Msg("handle user state failed")
+		lg.Error().Err(err).Msg("handle user state failed")
 
-		var resp = rpccall.SimpleUnpredictableErr(err)
-		srpc.WriteLoggedIfError(c, resp)
-
-		return
+		return 0, err
 	}
 
-	var resp = rpccall.Ok(state)
-
-	if ok := srpc.WriteLoggedIfError(c, resp); ok {
-		lg.Trace().Msg("handle user state completed")
+	if state == usermodel.Frozen {
+		return state, erespcode.NewUserFrozenErr()
+	} else if state == usermodel.Unregister {
+		return state, erespcode.NewUserUnregistersErr()
 	}
+
+	return state, nil
 }
 
-func (h *UserInfoHandler) HandleUsersUnitInfo(c *arpc.Context) {
-	var req rpccall.RpcReqWrapper[rpcuser.UsersUnitInfoReq]
-	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
-		return
-	}
-
-	lg := rpccall.LoggerWrapWithReq(req, h.dl)
+func (h *UserInfoHandler) HandleUsersUnitInfo(req rpccall.RpcReqWrapper[rpcuser.UsersUnitInfoReq]) (map[string]*rpcuser.UnitInfoRespItem, error) {
+	lg := req.BindLogger(h.dl)
 	lg.Debug().Any("req", req).Msg("handle users unit info start")
 
 	uid2item, err := h.uis.UsersUnitInfo(req.Req.Uids)
 
 	if err != nil {
-		lg.Error().Stack().Err(err).Msg("handle users unit info failed")
+		lg.Error().Err(err).Msg("handle users unit info failed")
 
-		var resp = rpccall.SimpleUnpredictableErr(err)
-		srpc.WriteLoggedIfError(c, resp)
-
-		return
+		return nil, rpccall.NewRpcUnpredictableErr(err)
 	}
 
-	var resp = rpccall.Ok(umap.Map(
+	return umap.Map(
 		uid2item,
 		func(_ string, val *inforepo.UserUnitInfo) *rpcuser.UnitInfoRespItem {
 			return &rpcuser.UnitInfoRespItem{
@@ -89,36 +73,24 @@ func (h *UserInfoHandler) HandleUsersUnitInfo(c *arpc.Context) {
 				Avatar:   val.Avatar,
 			}
 		},
-	))
-
-	if ok := srpc.WriteLoggedIfError(c, resp); ok {
-		lg.Trace().Msg("handle users unit info completed")
-	}
+	), nil
 }
 
-func (h *UserInfoHandler) HandleUserUnitInfo(c *arpc.Context) {
-	var req rpccall.RpcReqWrapper[rpcuser.UserUnitInfoReq]
-	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
-		return
-	}
-
-	lg := rpccall.LoggerWrapWithReq(req, h.dl)
+func (h *UserInfoHandler) HandleUserUnitInfo(req rpccall.RpcReqWrapper[rpcuser.UserUnitInfoReq]) (rpcuser.UnitInfoRespItem, error) {
+	lg := req.BindLogger(h.dl)
 	lg.Debug().Any("req", req).Msg("handle user unit info start")
 
 	info, err := h.uis.UserUnitInfo(req.Req.Uid)
 
 	if err != nil {
+		var zero rpcuser.UnitInfoRespItem
 		if err == infosrv.UserNotExistsErr {
-			srpc.WriteLoggedIfError(c, rpccall.SimpleErrDesc(err.Error()))
-			return
+			return zero, nil
 		}
 
-		lg.Error().Stack().Err(err).Msg("handle user unit info failed")
+		lg.Error().Err(err).Msg("handle user unit info failed")
 
-		var resp = rpccall.SimpleUnpredictableErr(err)
-		srpc.WriteLoggedIfError(c, resp)
-
-		return
+		return zero, err
 	}
 
 	item := rpcuser.UnitInfoRespItem{
@@ -127,9 +99,5 @@ func (h *UserInfoHandler) HandleUserUnitInfo(c *arpc.Context) {
 		Avatar:   info.Avatar,
 	}
 
-	var resp = rpccall.Ok(item)
-
-	if ok := srpc.WriteLoggedIfError(c, resp); ok {
-		lg.Trace().Msg("handle user unit info completed")
-	}
+	return item, nil
 }

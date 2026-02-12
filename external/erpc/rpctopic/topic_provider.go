@@ -17,11 +17,12 @@ type MsgComingReq struct {
 }
 
 type MsgComingResp struct {
-	MsgId          int64  `json:"msgId,omitempty"`
-	ClientUniqueId string `json:"clientUniqueId,omitempty"` // 客户端唯一id
-	ConvId         string `json:"convId,omitempty"`
-	MsgSeq         int64  `json:"msgSeq,omitempty"` // 消息序列号
-	SendTs         int64  `json:"sendTs,omitempty"` // 服务器时间戳
+	MsgId          int64          `json:"msgId,omitempty"`
+	ClientUniqueId string         `json:"clientUniqueId,omitempty"` // 客户端唯一id
+	ConvId         string         `json:"convId,omitempty"`
+	MsgSeq         int64          `json:"msgSeq,omitempty"` // 消息序列号
+	SendTs         int64          `json:"sendTs,omitempty"` // 服务器时间戳
+	Extra          map[string]any `json:"extra"`
 }
 
 // @rpc_server topic_server

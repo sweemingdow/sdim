@@ -10,7 +10,7 @@ import (
 func main() {
 	booter := boot.NewBooter()
 
-	booter.AddConfigStageOption(boot.WithLogger(func() string {
+	booter.AddConfigStageOption(boot.WithLogger(0, 5, func() string {
 		return ""
 	}))
 

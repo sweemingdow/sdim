@@ -2,10 +2,8 @@ package hrpc
 
 import (
 	"context"
-	"github.com/lesismal/arpc"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
-	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/sdim/external/eglobal/chatconst"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/msgpd"
@@ -30,22 +28,16 @@ func NewMsgHandler(msgResp msgrepo.MsgRepository) *MsgHandler {
 	}
 }
 
-func (mh *MsgHandler) HandlerBatchConvRecentlyMsgs(c *arpc.Context) {
-	var req rpcmsg.BatchConvRecentlyMsgsReq
-	if ok := srpc.BindAndWriteLoggedIfError(c, &req); !ok {
-		return
-	}
-
+func (mh *MsgHandler) HandlerBatchConvRecentlyMsgs(req rpcmsg.BatchConvRecentlyMsgsReq) (rpcmsg.BatchConvRecentlyMsgsResp, error) {
 	mh.dl.Trace().Strs("conv_ids", req.ConvIds).Msg("receive batch conv recently msgs")
 
 	if len(req.ConvIds) == 0 {
-		srpc.WriteLoggedIfError(c, rpcmsg.BatchConvRecentlyMsgsResp{
+		return rpcmsg.BatchConvRecentlyMsgsResp{
 			ConvId2Msgs: make(map[string][]*msgmodel.MsgItemInMem),
-		})
-		return
+		}, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20000*time.Second)
 	defer cancel()
 
 	var (
@@ -102,14 +94,11 @@ func (mh *MsgHandler) HandlerBatchConvRecentlyMsgs(c *arpc.Context) {
 
 	err := eg.Wait()
 	if err != nil {
-		srpc.WriteLoggedIfError(c, rpccall.SimpleErrDesc(err.Error()))
-		return
+		var zero rpcmsg.BatchConvRecentlyMsgsResp
+		return zero, rpccall.NewRpcUnpredictableErr(err)
 	}
 
-	srpc.WriteLoggedIfError(
-		c,
-		rpcmsg.BatchConvRecentlyMsgsResp{
-			ConvId2Msgs: convId2msgs,
-		},
-	)
+	return rpcmsg.BatchConvRecentlyMsgsResp{
+		ConvId2Msgs: convId2msgs,
+	}, nil
 }

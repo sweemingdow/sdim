@@ -14,9 +14,11 @@ type (
 	}
 
 	ConnAckFrame struct {
-		ErrCode  ErrCode `json:"errCode,omitempty"`
-		ErrDesc  string  `json:"errDesc,omitempty"`
+		RespCode ErrCode `json:"respCode,omitempty"`
+		ErrCode  string  `json:"errCode,omitempty"`
+		ErrMsg   string  `json:"errMsg,omitempty"`
 		TimeDiff int64   `json:"timeDiff"` // 客户端和服务器之间的时差
+		SignKey  string  `json:"signKey,omitempty"`
 	}
 )
 
@@ -36,9 +38,10 @@ type (
 	}
 
 	SendFrameAck struct {
-		ErrCode ErrCode          `json:"errCode,omitempty"`
-		ErrDesc string           `json:"errDesc,omitempty"`
-		Data    SendFrameAckBody `json:"data,omitempty"`
+		RespCode ErrCode          `json:"respCode,omitempty"`
+		ErrCode  string           `json:"errCode,omitempty"`
+		ErrMsg   string           `json:"errMsg,omitempty"`
+		Data     SendFrameAckBody `json:"data,omitempty"`
 	}
 
 	SendFrameAckBody struct {
@@ -90,8 +93,7 @@ type (
 
 const (
 	OK         ErrCode = 0
-	BizErr             = 1000
-	ServerErr  ErrCode = 2000
+	RpcCallErr ErrCode = 2000
 	RpcRespErr ErrCode = 3000
 )
 
@@ -101,7 +103,7 @@ type ErrItem struct {
 }
 
 var errCode2desc = map[ErrCode]string{
-	ServerErr:  "Server Internal Error",
+	RpcCallErr: "Server Internal Error",
 	RpcRespErr: "Inner Response Error",
 }
 

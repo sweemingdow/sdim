@@ -5,6 +5,7 @@ package rpcmsg
 import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rclient"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rclient/rcfactory"
+	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"time"
 )
 
@@ -18,20 +19,18 @@ func NewMsgProvider(clientFactory rcfactory.ArpcClientFactory) MsgProvider {
 	}
 }
 
-
-func (p *msgProvider) BatchConvRecentlyMsgs(req BatchConvRecentlyMsgsReq) (BatchConvRecentlyMsgsResp, error) {
+func (p *msgProvider) BatchConvRecentlyMsgs(req BatchConvRecentlyMsgsReq) (rpccall.RpcRespWrapper[BatchConvRecentlyMsgsResp], error) {
 	cp := p.acquireClientProxy()
-	var resp BatchConvRecentlyMsgsResp
+	var resp rpccall.RpcRespWrapper[BatchConvRecentlyMsgsResp]
 	var reqForCall interface{}
-	
+
 	reqForCall = &req
-	
-	if err := cp.Call("/batch_conv_recently_msgs", reqForCall, &resp, 3 * time.Second); err != nil {
+
+	if err := cp.Call("/batch_conv_recently_msgs", reqForCall, &resp, 3*time.Second); err != nil {
 		return resp, err
 	}
 	return resp, nil
 }
-
 
 func (p *msgProvider) acquireClientProxy() rclient.ArpcClientProxy {
 	return p.clientFactory.AcquireClient("msg_server")

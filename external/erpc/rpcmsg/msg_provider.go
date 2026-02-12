@@ -1,6 +1,9 @@
 package rpcmsg
 
-import "github.com/sweemingdow/sdim/external/emodel/msgmodel"
+import (
+	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
+	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
+)
 
 type BatchConvRecentlyMsgsReq struct {
 	ConvIds []string `json:"convIds"`
@@ -17,5 +20,5 @@ type BatchConvRecentlyMsgsResp struct {
 type MsgProvider interface {
 	// @path /batch_conv_recently_msgs
 	// @timeout 3s
-	BatchConvRecentlyMsgs(req BatchConvRecentlyMsgsReq) (BatchConvRecentlyMsgsResp, error)
+	BatchConvRecentlyMsgs(req BatchConvRecentlyMsgsReq) (rpccall.RpcRespWrapper[BatchConvRecentlyMsgsResp], error)
 }

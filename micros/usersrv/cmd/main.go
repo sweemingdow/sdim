@@ -23,7 +23,7 @@ import (
 func main() {
 	booter := boot.NewBooter()
 
-	booter.AddConfigStageOption(boot.WithLogger(nil))
+	booter.AddConfigStageOption(boot.WithLogger(0, 5, nil))
 
 	booter.AddComponentStageOption(boot.WithNacosClient())
 

@@ -62,14 +62,14 @@ func (gm *groupManager) OnGroupCreated(grpNo, creator string, uid2role map[strin
 	)
 }
 
-func (gm *groupManager) OnSendMsgInGroup(ctx context.Context, grpNo, sender string) (core.CanSendInfo, error) {
+func (gm *groupManager) OnSendMsgInGroup(ctx context.Context, grpNo, sender, convId, msgClientId string) (core.CanSendInfo, error) {
 	grpInfo, err := gm.initGroupInfoLazy(ctx, grpNo)
 	if err != nil {
 		var info core.CanSendInfo
 		return info, err
 	}
 
-	return gm.groupIno2canSendInfo(grpInfo, sender), nil
+	return gm.groupIno2canSendInfo(grpInfo, sender, convId, msgClientId), nil
 }
 
 func (gm *groupManager) initGroupInfoLazy(ctx context.Context, grpNo string) (*core.GroupInfo, error) {
@@ -172,16 +172,39 @@ func (gm *groupManager) GetGroupMebUids(ctx context.Context, grpNo string) []str
 	return make([]string, 0)
 }
 
-func (gm *groupManager) groupIno2canSendInfo(grpInfo *core.GroupInfo, sender string) core.CanSendInfo {
+func (gm *groupManager) OnGroupMebRemoved(grpNo string, remUids []string) {
+	_, _ = gm.segLock.WithLock(
+		grpNo,
+		func() (any, error) {
+			// copy
+			info, ok := gm.grpNo2info[grpNo]
+			if ok {
+				for _, uid := range remUids {
+					if item, ok := info.Meb2item[uid]; ok {
+						item.State = chatmodel.GrpMebKicked
+					}
+				}
+				return nil, nil
+			}
+
+			return nil, nil
+		})
+}
+
+func (gm *groupManager) groupIno2canSendInfo(grpInfo *core.GroupInfo, sender, convId, msgClientId string) core.CanSendInfo {
 	if grpInfo.State != chatmodel.GrpNormal {
 		return core.CanSendInfo{
-			GrpState: grpInfo.State,
+			GrpState:    grpInfo.State,
+			ConvId:      convId,
+			ClientMsgId: msgClientId,
 		}
 	}
 
 	if item, ok := grpInfo.Meb2item[sender]; !ok {
 		return core.CanSendInfo{
 			MebNotInGrp: true,
+			ConvId:      convId,
+			ClientMsgId: msgClientId,
 		}
 	} else {
 		members := make([]string, 0, len(grpInfo.Meb2item)-1)
@@ -203,6 +226,8 @@ func (gm *groupManager) groupIno2canSendInfo(grpInfo *core.GroupInfo, sender str
 			ForbiddenSec:   item.ForbiddenSec,
 			ForbiddenAt:    item.ForbiddenAt,
 			ForwardMembers: members,
+			ConvId:         convId,
+			ClientMsgId:    msgClientId,
 		}
 	}
 }

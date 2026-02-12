@@ -12,8 +12,8 @@ type GroupState int8
 
 const (
 	GrpNormal    GroupState = 1 // ok
-	GrpBan       GroupState = 2 // ban
-	GrpDismissed GroupState = 3 // dismissed
+	GrpFrozen    GroupState = 2 // 冻结
+	GrpDismissed GroupState = 3 // 解散
 )
 
 type GroupMebState int8

@@ -2,10 +2,10 @@ package convmgr
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/gammazero/deque"
 	"github.com/nsqio/go-nsq"
+	"github.com/pkg/errors"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cid/sfid"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/guc"
@@ -18,7 +18,9 @@ import (
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/msgpd"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
+	"github.com/sweemingdow/sdim/external/erespcode"
 	"github.com/sweemingdow/sdim/external/erpc/rpcmsg"
+	"github.com/sweemingdow/sdim/external/erpc/rpctopic"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/nsqsend"
@@ -287,7 +289,13 @@ func (cm *convManager) SyncHotConvList(uid string) []*core.ConvListItem {
 		return make([]*core.ConvListItem, 0)
 	}
 
-	convId2msgs := resp.ConvId2Msgs
+	respData, err := resp.OkOrErr()
+	if err != nil {
+		lg.Error().Str("uid", uid).Strs("conv_ids", convIds).Stack().Err(err).Msg("find batch conv recently msgs with rpc failed")
+		return make([]*core.ConvListItem, 0)
+	}
+
+	convId2msgs := respData.ConvId2Msgs
 
 	var msgSeq, _, lastActiveTs, userBrowseSeq, unreadCount int64
 	items := make([]*core.ConvListItem, len(convItems))
@@ -966,7 +974,7 @@ func (cm *convManager) p2pConvHandle(convId string, msgId int64, convType chatco
 func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chatconst.ConvType, pa core.MsgComingParam) (int64, error) {
 	grpNo := pa.Receiver
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	chrVal, rstErr := cm.convSegLock.WithLockManual(
@@ -1170,7 +1178,7 @@ func (cm *convManager) groupConvHandle(convId string, msgId int64, convType chat
 	}
 
 	// 群管理
-	canInfo, err := cm.gm.OnSendMsgInGroup(ctx, grpNo, pa.Sender)
+	canInfo, err := cm.gm.OnSendMsgInGroup(ctx, grpNo, pa.Sender, convId, pa.ClientUniqueId)
 	if err != nil {
 		return 0, err
 	}
@@ -1253,14 +1261,26 @@ func (cm *convManager) dbConv2local(conv *convrepo.Conv, sender, receiver string
 
 func (cm *convManager) canSendMsgInGroup(info core.CanSendInfo) error {
 	if info.GrpState != chatmodel.GrpNormal {
-		return errors.New(fmt.Sprintf("can not send msg in this group, state:%d", info.GrpState))
+		if info.GrpState == chatmodel.GrpFrozen {
+			return erespcode.NewGroupForbiddenErr()
+		} else if info.GrpState == chatmodel.GrpDismissed {
+			return erespcode.NewGroupDismissedErr()
+		}
 	} else if info.MebNotInGrp {
-		return errors.New("can not send msg in this group, member not in")
+		return erespcode.NewMebNotInGroupErr()
 	} else if info.GrpMebState != chatmodel.GrpMebNormal {
-		return errors.New(fmt.Sprintf("can not send msg in this group, mebState:%d", info.GrpMebState))
+		if info.GrpMebState == chatmodel.GrpMebKicked {
+			return erespcode.NewMebBeKickedErr()
+		}
 	} else if info.ForbiddenAt > time.Now().Unix() {
-		return errors.New(fmt.Sprintf("can not send msg in this group, forbbiden remains:%d seconds", time.Now().Unix()-info.ForbiddenAt))
+		return erespcode.NewGroupFrozenErr(rpctopic.MsgComingResp{
+			Extra: map[string]any{
+				"forbiddenAt": info.ForbiddenAt,
+			},
+		})
 	}
+
+	// todo 群成员单独被禁言
 
 	return nil
 }

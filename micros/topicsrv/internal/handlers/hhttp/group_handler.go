@@ -10,6 +10,7 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cid/sfid"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/csql"
+	"github.com/sweemingdow/gmicro_pkg/pkg/executor"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils"
@@ -27,7 +28,6 @@ import (
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core/nsqsend"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
-	"github.com/sweemingdow/sdim/pkg/async"
 	"github.com/sweemingdow/sdim/pkg/wrapper"
 	"strings"
 	"sync/atomic"
@@ -48,7 +48,7 @@ type GroupHttpHandler struct {
 	done         chan struct{}
 	doneChan     chan *nsq.ProducerTransaction
 	closed       atomic.Bool
-	ah           async.AsyncHandler
+	executor     executor.Executor
 	nsqPd        *cnsq.NsqProducer
 	dl           *mylog.DecoLogger
 }
@@ -71,7 +71,7 @@ func NewGroupHttpHandler(
 		userProvider: userProvider,
 		doneChan:     make(chan *nsq.ProducerTransaction, 10),
 		done:         make(chan struct{}),
-		ah: async.NewCallerRunHandler(async.CallerRunOptions{
+		executor: executor.NewCallerRunExecutor(executor.CallerRunOptions{
 			CoreWorkers:      2,
 			MaxWorkers:       16,
 			MaxWaitQueueSize: 512,
@@ -351,7 +351,7 @@ func (h *GroupHttpHandler) HandleSettingGroupName(c *fiber.Ctx) error {
 		GroupName: &groupName,
 	})
 
-	err = h.ah.Submit(func() {
+	err = h.executor.Submit(func() {
 		resp, ie := h.userProvider.UserUnitInfo(rpccall.CreateReq(rpcuser.UserUnitInfoReq{Uid: uid}))
 		if ie != nil {
 			lg.Error().Err(ie).Msg("rpc qry user unit info failed")
@@ -361,6 +361,11 @@ func (h *GroupHttpHandler) HandleSettingGroupName(c *fiber.Ctx) error {
 		userInfo, ie := resp.OkOrErr()
 		if ie != nil {
 			lg.Error().Err(ie).Msg("rpc qry user unit info resp not ok")
+			return
+		}
+
+		if userInfo.Uid == "" {
+			lg.Warn().Msgf("user not exists, uid=%s", uid)
 			return
 		}
 
@@ -470,7 +475,7 @@ func (h *GroupHttpHandler) HandleSettingGroupBak(c *fiber.Ctx) error {
 		Remark:  &groupBak,
 	})
 
-	err = h.ah.Submit(func() {
+	err = h.executor.Submit(func() {
 		// 发送会话变更通知
 		eventPd := convpd.ConvUnitDataUpdatePayload{
 			ConvId:       convId,
@@ -574,7 +579,7 @@ func (h *GroupHttpHandler) OnDispose(ctx context.Context) error {
 
 	close(h.done)
 
-	err := h.ah.Shutdown(ctx)
+	err := h.executor.Shutdown(ctx)
 	if err != nil {
 		return err
 	}
@@ -651,7 +656,7 @@ func (h *GroupHttpHandler) HandleSettingGroupNickname(c *fiber.Ctx) error {
 		return err
 	}
 
-	err = h.ah.Submit(func() {
+	err = h.executor.Submit(func() {
 		mebUids := h.gm.GetGroupMebUids(context.Background(), groupNo)
 
 		if len(mebUids) == 0 {
@@ -700,12 +705,7 @@ func (h *GroupHttpHandler) HandleAddMembers(c *fiber.Ctx) error {
 	return nil
 }
 
-func (h *GroupHttpHandler) HandleRemoveMembers(c *fiber.Ctx) error {
-	var req AddRemMembersReq
-	if err := c.BodyParser(&req); err != nil {
-		return err
-	}
-
+func (h *GroupHttpHandler) HandleRemoveMembers(req AddRemMembersReq) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -731,14 +731,17 @@ func (h *GroupHttpHandler) HandleRemoveMembers(c *fiber.Ctx) error {
 		})
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if len(remUids) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	err = h.ah.Submit(func() {
+	// 更新群内成员状态
+	h.gm.OnGroupMebRemoved(req.GroupNo, remUids)
+
+	err = h.executor.Submit(func() {
 		newMebs := append([]string{req.Uid}, req.Members...)
 		// rpc查用户信息
 		rpcResp, ie := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
@@ -796,7 +799,134 @@ func (h *GroupHttpHandler) HandleRemoveMembers(c *fiber.Ctx) error {
 		// 发送通知消息
 		pd := notifypd.NotifyPayload{
 			NotifyType: chatconst.GroupNotifyType,
-			SubType:    chatconst.GroupAddMembers,
+			SubType:    chatconst.GroupRemoveMembers,
+			Members:    newMebs,
+			Data: map[string]any{
+				"convId":      chatmodel.GenerateGroupChatConvId(req.GroupNo),
+				"groupNo":     req.GroupNo,
+				"removedUids": remUids,
+			},
+		}
+
+		ie = h.nsqPd.JsonPublish(
+			nsqconst.SrvNotifyTopic,
+			pd,
+		)
+
+		if ie != nil {
+			h.dl.Error().Err(ie).Msg("publish notify payload failed")
+			return
+		}
+	})
+
+	if err != nil {
+		h.dl.Error().Err(err).Msg("group remove members failed")
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+/*func (h *GroupHttpHandler) HandleRemoveMembers(req AddRemMembersReq) (any,error) {
+	var req AddRemMembersReq
+	if err := c.BodyParser(&req); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var remUids []string
+	err := h.tm.DoInTx(
+		ctx,
+		func(_ context.Context, tx *dbr.Tx) error {
+			// 查询操作者是否有权限
+			role, ie := h.gr.GetRoleInGroup(ctx, req.GroupNo, req.Uid, tx)
+			if ie != nil {
+				return errors.Wrap(ie, "get group role failed")
+			}
+			if role > chatmodel.Manager {
+				return errors.New("no permission")
+			}
+
+			remUids, ie = h.gr.RemoveMembers(ctx, tx, req.GroupNo, req.Members)
+			if ie != nil {
+				return errors.Wrap(ie, "remove group member failed")
+			}
+
+			return nil
+		})
+
+	if err != nil {
+		return err
+	}
+
+	if len(remUids) == 0 {
+		return nil
+	}
+
+	// 更新群内成员状态
+	h.gm.OnGroupMebRemoved(req.GroupNo, remUids)
+
+	err = h.executor.Submit(func() {
+		newMebs := append([]string{req.Uid}, req.Members...)
+		// rpc查用户信息
+		rpcResp, ie := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
+		if ie != nil {
+			h.dl.Error().Err(ie).Msg("rpc qry users unit info failed")
+			return
+		}
+
+		uid2info, ie := rpcResp.OkOrErr()
+		if ie != nil {
+			h.dl.Error().Err(ie).Msg("rpc qry users unit info resp not ok")
+			return
+		}
+
+		mills := time.Now().UnixMilli()
+		// 发送cmd消息, {0}修改群名称为:{groupName}
+		groupRemFmt, fmtItems := h.buildRemoveInfoFmt(uid2info, newMebs)
+		remMsg := &msgmodel.LastMsg{
+			MsgId: sfid.Next(),
+			SenderInfo: msgmodel.SenderInfo{
+				SenderType: chatmodel.SysCmdSender,
+			},
+			Content: msgmodel.BuildGroupRemoveCmdMsg(
+				map[string]any{
+					"groupRemItems": fmtItems,
+					"remHint":       groupRemFmt,
+				},
+			),
+		}
+		// 发送receivePayload
+		receivePd := &msgpd.MsgSendReceivePayload{
+			ConvId:           chatmodel.GenerateGroupChatConvId(req.GroupNo),
+			ConvLastActiveTs: mills,
+			MsgId:            remMsg.MsgId,
+			MsgSeq:           0,
+			ChatType:         chatconst.GroupChat,
+			SenderType:       chatmodel.SysCmdSender,
+			Sender:           chatmodel.SysAutoSend,
+			Receiver:         req.GroupNo,
+			Members:          newMebs,
+			SendTs:           mills,
+			MsgContent:       remMsg.Content,
+		}
+
+		ie = h.nsqPd.JsonPublish(
+			nsqconst.MsgReceiveTopic,
+			receivePd,
+		)
+
+		if ie != nil {
+			h.dl.Error().Err(ie).Msg("publish receive payload failed")
+			return
+		}
+
+		// 发送通知消息
+		pd := notifypd.NotifyPayload{
+			NotifyType: chatconst.GroupNotifyType,
+			SubType:    chatconst.GroupRemoveMembers,
 			Members:    newMebs,
 			Data: map[string]any{
 				"convId":      chatmodel.GenerateGroupChatConvId(req.GroupNo),
@@ -822,4 +952,4 @@ func (h *GroupHttpHandler) HandleRemoveMembers(c *fiber.Ctx) error {
 	}
 
 	return nil
-}
+}*/

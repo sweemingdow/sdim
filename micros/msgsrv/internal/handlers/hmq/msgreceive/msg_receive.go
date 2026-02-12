@@ -3,6 +3,7 @@ package msgreceive
 import (
 	"github.com/nsqio/go-nsq"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
+	"github.com/sweemingdow/gmicro_pkg/pkg/executor"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/parser/json"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
@@ -13,7 +14,6 @@ import (
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel/msgpojo"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
 	"github.com/sweemingdow/sdim/micros/msgsrv/internal/repostories/msgrepo"
-	"github.com/sweemingdow/sdim/pkg/async"
 	"time"
 )
 
@@ -24,7 +24,7 @@ const (
 type msgReceiveHandler struct {
 	mr           msgrepo.MsgRepository
 	userProvider rpcuser.UserInfoRpcProvider
-	ah           async.AsyncHandler
+	executor     executor.Executor
 	nsqPd        *cnsq.NsqProducer
 	dl           *mylog.DecoLogger
 }
@@ -33,7 +33,7 @@ func NewMsgReceiveHandler(mr msgrepo.MsgRepository, userProvider rpcuser.UserInf
 	return &msgReceiveHandler{
 		mr:           mr,
 		userProvider: userProvider,
-		ah: async.NewCallerRunHandler(async.CallerRunOptions{
+		executor: executor.NewCallerRunExecutor(executor.CallerRunOptions{
 			CoreWorkers:      8,
 			MaxWorkers:       128,
 			MaxWaitQueueSize: 2048,
@@ -70,7 +70,7 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 		return nil
 	}
 
-	err = mrh.ah.Submit(func() {
+	err = mrh.executor.Submit(func() {
 		var sendInfo msgmodel.SenderInfo
 		if chatmodel.IsUserSend(msgPd.SenderType) {
 			resp, ie := mrh.userProvider.UserUnitInfo(rpccall.CreateIdReq(msgPd.ReqId, rpcuser.UserUnitInfoReq{Uid: msgPd.Sender}))
@@ -85,6 +85,12 @@ func (mrh *msgReceiveHandler) HandleMessage(message *nsq.Message) error {
 			if ie != nil {
 				lg.Error().Stack().Err(ie).Msgf("find user with rpc response failed, uid:%s", msgPd.Sender)
 				message.Requeue(100 * time.Millisecond)
+				return
+			}
+
+			// 用户不存在
+			if info.Uid == "" {
+				lg.Warn().Msgf("user not exists, uid=%s", msgPd.Sender)
 				return
 			}
 

@@ -30,13 +30,17 @@ type CanSendInfo struct {
 	GrpMebState    chatmodel.GroupMebState
 	ForbiddenSec   int32
 	ForbiddenAt    int64
+	ClientMsgId    string
+	ConvId         string
 	ForwardMembers []string
 }
 
 type GroupManager interface {
 	OnGroupCreated(grpNo, creator string, uid2role map[string]chatmodel.GroupRole)
 
-	OnSendMsgInGroup(ctx context.Context, grpNo, sender string) (CanSendInfo, error)
+	OnSendMsgInGroup(ctx context.Context, grpNo, sender, convId, msgClientId string) (CanSendInfo, error)
 
 	GetGroupMebUids(ctx context.Context, grpNo string) []string
+
+	OnGroupMebRemoved(grpNo string, remUids []string)
 }

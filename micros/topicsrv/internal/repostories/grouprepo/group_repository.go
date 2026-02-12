@@ -205,7 +205,7 @@ func (gr *groupRepository) FindGroupInfo(ctx context.Context, groupNo string) (*
 func (gr *groupRepository) FindGroupItems(ctx context.Context, groupNo string) ([]*chatpojo.GroupItem, error) {
 	var pojos []*chatpojo.GroupItem
 	err := gr.sc.WithSess(func(sess *dbr.Session) error {
-		_, ie := sess.Select("*").From("t_group_item").Where("group_no = ?", groupNo).LoadContext(ctx, &pojos)
+		_, ie := sess.Select("*").From("t_group_item").Where("group_no = ? and state = ?", groupNo, chatmodel.GrpMebNormal).LoadContext(ctx, &pojos)
 		if ie != nil {
 			return ie
 		}
@@ -355,7 +355,7 @@ func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupN
 	var pojo chatpojo.GroupItem
 	// 查询当前已存在的成员
 	_, err := tx.Select("uid").From(pojo.TableName()).
-		Where("group_no = ? and uid in ? and state = ?", groupNo, members).
+		Where("group_no = ? and uid in ? and state = ?", groupNo, members, chatmodel.GrpMebNormal).
 		LoadContext(ctx, &existsUids)
 	if err != nil {
 		return existsUids, err
@@ -366,7 +366,7 @@ func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupN
 	}
 
 	_, err = tx.Update(pojo.TableName()).
-		Set("state = ?", chatmodel.GrpMebKicked).
+		Set("state", chatmodel.GrpMebKicked).
 		Where("group_no = ? and uid in ?", groupNo, existsUids).Exec()
 	if err != nil {
 		return existsUids, err
@@ -378,7 +378,7 @@ func (gr *groupRepository) RemoveMembers(ctx context.Context, tx *dbr.Tx, groupN
 func (gr *groupRepository) GetRoleInGroup(ctx context.Context, groupNo string, uid string, tx *dbr.Tx) (chatmodel.GroupRole, error) {
 	var role int8
 	err := tx.Select("role").From(chatpojo.GroupItem{}.TableName()).
-		Where("group_no = ?  and uid = ? and state = ?", groupNo, uid, chatmodel.GrpMebNormal).
+		Where("group_no = ? and uid = ? and state = ?", groupNo, uid, chatmodel.GrpMebNormal).
 		LoadOneContext(ctx, &role)
 	if err != nil {
 		return 0, err

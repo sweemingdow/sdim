@@ -8,7 +8,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/app"
 	"github.com/sweemingdow/gmicro_pkg/pkg/component/cnsq"
-	"github.com/sweemingdow/gmicro_pkg/pkg/myerr"
 	"github.com/sweemingdow/gmicro_pkg/pkg/mylog"
 	"github.com/sweemingdow/gmicro_pkg/pkg/server/srpc/rpccall"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/usli"
@@ -171,34 +170,19 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 				}
 
 				// rpc: 调用TopicServer
-				resp, re := fh.topicProvider.MsgComing(rpccall.CreateIdReq(reqId, req))
+				resp, e := fh.topicProvider.MsgComing(rpccall.CreateIdReq(reqId, req))
 
-				if re != nil {
-					clg.Error().Stack().Err(re).Msg("call rpc failed when msg coming")
-					app.GetTheApp().IsDevProfile()
-
-					fh.writeSendAckFrame(
-						fcodec.SendFrameAck{
-							ErrCode: fcodec.ServerErr,
-							ErrDesc: re.Error(),
-						},
-						fr,
-						c,
-						clg,
-					)
-					return
-				}
-
-				r, e := resp.OkOrErr()
 				if e != nil {
-					clg.Error().Err(e).Msgf("rpc call resp invalid")
-
-					rre, _ := myerr.DecodeRpcRespError(e)
+					clg.Error().Stack().Err(e).Msg("call rpc failed when msg coming")
 
 					fh.writeSendAckFrame(
 						fcodec.SendFrameAck{
-							ErrCode: fcodec.RpcRespErr,
-							ErrDesc: rre.ErrDesc,
+							RespCode: fcodec.RpcCallErr,
+							ErrMsg:   fcodec.TransferDesc(fcodec.RpcCallErr),
+							Data: fcodec.SendFrameAckBody{
+								ClientUniqueId: sendFrb.ClientUniqueId,
+								ConvId:         sendFrb.ConvId,
+							},
 						},
 						fr,
 						c,
@@ -207,12 +191,33 @@ func (fh *asyncFrameHandler) handleFrames(connId string, c gnet.Conn, frs []fcod
 					return
 				}
 
-				lg.Debug().Msgf("msg coming return resp:%+v", r)
+				if !resp.IsOk() {
+					clg.Warn().Msgf("rpc call response not ok, resp=%s", resp)
+
+					fh.writeSendAckFrame(
+						fcodec.SendFrameAck{
+							RespCode: fcodec.RpcRespErr,
+							ErrCode:  resp.Code,
+							ErrMsg:   resp.Msg,
+							Data: fcodec.SendFrameAckBody{
+								ClientUniqueId: req.ClientUniqueId,
+								ConvId:         req.ConvId,
+							},
+						},
+						fr,
+						c,
+						clg,
+					)
+					return
+				}
+
+				lg.Debug().Msgf("msg coming return respData:%+v", resp.Data)
 
 				data := resp.Data
+
 				fh.writeSendAckFrame(
 					fcodec.SendFrameAck{
-						ErrCode: fcodec.OK,
+						RespCode: fcodec.OK,
 						Data: fcodec.SendFrameAckBody{
 							MsgId:          data.MsgId,
 							ClientUniqueId: data.ClientUniqueId,
@@ -243,10 +248,10 @@ func (fh *asyncFrameHandler) extractReqId(fr fcodec.Frame) string {
 }
 
 func (fh *asyncFrameHandler) writeConnAckFrame(caf fcodec.ConnAckFrame, fr fcodec.Frame, c gnet.Conn, clg zerolog.Logger) {
-	if fh.isProd && caf.ErrCode != fcodec.BizErr {
-		caf.ErrDesc = fcodec.TransferDesc(caf.ErrCode)
+	/*if fh.isProd {
+		caf.ErrMsg = fcodec.TransferDesc(caf.RespCode)
 	}
-
+	*/
 	sfr, err := fcodec.NewS2cFrame(
 		fr.Payload,
 		fcodec.ConnAck,
@@ -277,7 +282,7 @@ func (fh *asyncFrameHandler) writeConnAckFrame(caf fcodec.ConnAckFrame, fr fcode
 
 func (fh *asyncFrameHandler) writeSendAckFrame(sfa fcodec.SendFrameAck, fr fcodec.Frame, c gnet.Conn, clg zerolog.Logger) {
 	if fh.isProd {
-		sfa.ErrDesc = fcodec.TransferDesc(sfa.ErrCode)
+		sfa.ErrMsg = fcodec.TransferDesc(sfa.RespCode)
 	}
 
 	sfr, err := fcodec.NewS2cFrame(
@@ -337,11 +342,12 @@ func (fh *asyncFrameHandler) handleConnFrame(connId string, connFr fcodec.Frame,
 
 	lg = lg.With().Str("uid", cf.Uid).Logger()
 
+	// todo 查询错误和rpc结果异常, 应当剔除延时队列中检测auth的消息
 	if err != nil {
 		lg.Error().Stack().Err(err).Msg("user state rpc failed")
 		caf := fcodec.ConnAckFrame{
-			ErrCode:  fcodec.ServerErr,
-			ErrDesc:  err.Error(),
+			RespCode: fcodec.RpcCallErr,
+			ErrMsg:   err.Error(),
 			TimeDiff: sn - cf.TsMills,
 		}
 
@@ -352,12 +358,11 @@ func (fh *asyncFrameHandler) handleConnFrame(connId string, connFr fcodec.Frame,
 
 	lg.Trace().Any("resp", resp).Msg("user state rpc success")
 
-	state, err := resp.OkOrErr()
-	if err != nil {
+	if !resp.IsOk() {
 		caf := fcodec.ConnAckFrame{
-			ErrCode:  fcodec.RpcRespErr,
-			ErrDesc:  err.Error(),
-			TimeDiff: sn - cf.TsMills,
+			RespCode: fcodec.RpcRespErr,
+			ErrCode:  resp.Code,
+			ErrMsg:   resp.Msg,
 		}
 
 		fh.writeConnAckFrame(caf, connFr, c, lg)
@@ -365,17 +370,17 @@ func (fh *asyncFrameHandler) handleConnFrame(connId string, connFr fcodec.Frame,
 		return
 	}
 
-	if !state.IsOk() {
+	/*if !resp.Data.IsOk() {
 		caf := fcodec.ConnAckFrame{
-			ErrCode:  fcodec.BizErr,
-			ErrDesc:  fmt.Sprintf("user state invalid:%d", state),
+			RespCode: fcodec.RpcRespErr,
+			ErrMsg:   fmt.Sprintf("user state invalid:%d", resp.Data),
 			TimeDiff: sn - cf.TsMills,
 		}
 
 		fh.writeConnAckFrame(caf, connFr, c, lg)
 
 		return
-	}
+	}*/
 
 	// 认证成功, 修改
 	fh.cm.ModifyAfterAuthed(core.ConnModifyParam{
@@ -385,7 +390,7 @@ func (fh *asyncFrameHandler) handleConnFrame(connId string, connFr fcodec.Frame,
 	})
 
 	caf := fcodec.ConnAckFrame{
-		ErrCode:  fcodec.OK,
+		RespCode: fcodec.OK,
 		TimeDiff: sn - cf.TsMills,
 	}
 
