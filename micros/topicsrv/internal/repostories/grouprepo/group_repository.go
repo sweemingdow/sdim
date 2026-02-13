@@ -198,11 +198,8 @@ func (gr *groupRepository) FindGroupInfo(ctx context.Context, groupNo string) (*
 	})
 
 	if err != nil {
-		if err == dbr.ErrNotFound {
-			return nil, err
-		}
-		//return nil, errors.Wrapf(err, "find group info failed, groupNo=%s", groupNo)
-		return nil, errors.WithStack(err)
+		//return nil, errors.WithStack(err)
+		return nil, errors.Wrapf(err, "find group failed, groupNo=%s", groupNo)
 	}
 
 	return &pojo, nil

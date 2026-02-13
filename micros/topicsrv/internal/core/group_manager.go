@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
+	"github.com/sweemingdow/sdim/external/emodel/usermodel"
 )
 
 type GroupInfo struct {
@@ -43,4 +44,6 @@ type GroupManager interface {
 	GetGroupMebUids(ctx context.Context, grpNo string) []string
 
 	OnGroupMebRemoved(grpNo string, remUids []string)
+
+	OnGroupMebAdded(ctx context.Context, groupNo string, mebsInfo []usermodel.UserUnitInfo) (int, error)
 }

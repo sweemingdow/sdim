@@ -21,8 +21,8 @@ nacos-center-config:
       - name: static-config.yaml
         group-name:
     dynamic:
-#      - name: dynamic-config.yaml
-#        group-name:
+  #      - name: dynamic-config.yaml
+  #        group-name:
   # 注册/发现中心
   registry-discover:
     cluster-name: ""
@@ -31,19 +31,24 @@ nacos-center-config:
 
 log-config:
   level: trace
+  log-async-config:
+    queue-size: 200
+    quantitative-size: 100
+    timing: 100ms
+    stop-timeout: 3s
+    flush-workers: 2
+    debug: false
   file-log-config:
     file-path: ./.logs
     max-file-size: 10
     max-backup: 3
     history-days: 7
     compress: true
-  remote-log-config:
-    host: 192.168.1.6
+  tcp-log-writer-config:
+    host: 192.168.1.155
     port: 5171
-    reconnect-max-delay-mills: 30000
-    queue-size: 200
-    stop-timeout-mills: 5000
+    keep-alive: 120s
+    reconnect-max-delay: 10s
+    dial-timeout: 2s
+    write-timeout: 2s
     must-connected-in-init: true
-    batch-timing-mills: 100
-    batch-quantitative-size: 100
-    debug: false

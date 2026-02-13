@@ -24,6 +24,7 @@ import (
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/msgpd"
 	"github.com/sweemingdow/sdim/external/eglobal/nsqconst/payload/notifypd"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
+	"github.com/sweemingdow/sdim/external/emodel/chatmodel/chatpojo"
 	"github.com/sweemingdow/sdim/external/emodel/msgmodel"
 	"github.com/sweemingdow/sdim/external/emodel/usermodel"
 	"github.com/sweemingdow/sdim/external/erpc/rpcuser"
@@ -506,10 +507,12 @@ func (h *GroupHttpHandler) buildInviteInfoFmt(uid2info map[string]*rpcuser.UnitI
 
 	for idx, mebUid := range members {
 		info, ok := uid2info[mebUid]
-		nickname := info.Nickname
-		uidNicknames[idx] = chatmodel.UidNickname{
-			Uid:      mebUid,
-			Nickname: nickname,
+		if ok {
+			nickname := info.Nickname
+			uidNicknames[idx] = chatmodel.UidNickname{
+				Uid:      mebUid,
+				Nickname: nickname,
+			}
 		}
 
 		if ok && idx > 0 {
@@ -700,6 +703,12 @@ func (h *GroupHttpHandler) HandleAddMembers(req AddRemMembersReq) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	h.dl.Info().Msgf("add group members, req=%+v", req)
+
+	if len(req.Members) == 0 {
+		return nil, apicall.NewParamInvalidErr("members is required")
+	}
+
 	// rpc查询用户信息
 	newMebs := append([]string{req.Uid}, req.Members...)
 	usersResp, err := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
@@ -723,6 +732,7 @@ func (h *GroupHttpHandler) HandleAddMembers(req AddRemMembersReq) (any, error) {
 		},
 	)
 
+	var groupInfo *chatpojo.Group
 	err = h.tm.DoInTx(
 		ctx,
 		func(_ context.Context, tx *dbr.Tx) error {
@@ -744,6 +754,13 @@ func (h *GroupHttpHandler) HandleAddMembers(req AddRemMembersReq) (any, error) {
 				return ie
 			}
 
+			// todo 会话处理
+
+			groupInfo, ie = h.gr.FindGroupInfo(ctx, req.GroupNo)
+			if ie != nil {
+				return ie
+			}
+
 			return nil
 		})
 
@@ -751,92 +768,105 @@ func (h *GroupHttpHandler) HandleAddMembers(req AddRemMembersReq) (any, error) {
 		return nil, err
 	}
 
-	// todo发送消息和通知
 	// 添加新成员
-	//h.gm.OnGroupMebAdded(req.GroupNo, remUids)
+	groupMebCount, err := h.gm.OnGroupMebAdded(ctx, req.GroupNo, mebInfo)
+	if err != nil {
+		return nil, err
+	}
 
-	//err = h.executor.Submit(func() {
-	//	newMebs := append([]string{req.Uid}, req.Members...)
-	//	// rpc查用户信息
-	//	rpcResp, ie := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
-	//	if ie != nil {
-	//		h.dl.Error().Err(ie).Msg("rpc qry users unit info failed")
-	//		return
-	//	}
-	//
-	//	uid2info, ie := rpcResp.OkOrErr()
-	//	if ie != nil {
-	//		h.dl.Error().Err(ie).Msg("rpc qry users unit info resp not ok")
-	//		return
-	//	}
-	//
-	//	mills := time.Now().UnixMilli()
-	//	// 发送cmd消息, {0}修改群名称为:{groupName}
-	//	groupRemFmt, fmtItems := h.buildRemoveInfoFmt(uid2info, newMebs)
-	//	remMsg := &msgmodel.LastMsg{
-	//		MsgId: sfid.Next(),
-	//		SenderInfo: msgmodel.SenderInfo{
-	//			SenderType: chatmodel.SysCmdSender,
-	//		},
-	//		Content: msgmodel.BuildGroupRemoveCmdMsg(
-	//			map[string]any{
-	//				"groupRemItems": fmtItems,
-	//				"remHint":       groupRemFmt,
-	//			},
-	//		),
-	//	}
-	//	// 发送receivePayload
-	//	receivePd := &msgpd.MsgSendReceivePayload{
-	//		ConvId:           chatmodel.GenerateGroupChatConvId(req.GroupNo),
-	//		ConvLastActiveTs: mills,
-	//		MsgId:            remMsg.MsgId,
-	//		MsgSeq:           0,
-	//		ChatType:         chatconst.GroupChat,
-	//		SenderType:       chatmodel.SysCmdSender,
-	//		Sender:           chatmodel.SysAutoSend,
-	//		Receiver:         req.GroupNo,
-	//		Members:          newMebs,
-	//		SendTs:           mills,
-	//		MsgContent:       remMsg.Content,
-	//	}
-	//
-	//	ie = h.nsqPd.JsonPublish(
-	//		nsqconst.MsgReceiveTopic,
-	//		receivePd,
-	//	)
-	//
-	//	if ie != nil {
-	//		h.dl.Error().Err(ie).Msg("publish receive payload failed")
-	//		return
-	//	}
-	//
-	//	// 发送通知消息
-	//	pd := notifypd.NotifyPayload{
-	//		NotifyType: chatconst.GroupNotifyType,
-	//		SubType:    chatconst.GroupRemoveMembers,
-	//		Members:    newMebs,
-	//		Data: map[string]any{
-	//			"convId":      chatmodel.GenerateGroupChatConvId(req.GroupNo),
-	//			"groupNo":     req.GroupNo,
-	//			"removedUids": remUids,
-	//		},
-	//	}
-	//
-	//	ie = h.nsqPd.JsonPublish(
-	//		nsqconst.SrvNotifyTopic,
-	//		pd,
-	//	)
-	//
-	//	if ie != nil {
-	//		h.dl.Error().Err(ie).Msg("publish notify payload failed")
-	//		return
-	//	}
-	//})
-	//
-	//if err != nil {
-	//	h.dl.Error().Err(err).Msg("group remove members failed")
-	//	return nil, err
-	//}
+	err = h.executor.Submit(func() {
+		convId := chatmodel.GenerateGroupChatConvId(req.GroupNo)
+		hintFmt, fmtItems := h.buildInviteInfoFmt(rd, newMebs, convId)
+
+		inviteMsg := &msgmodel.LastMsg{
+			MsgId: sfid.Next(),
+			SenderInfo: msgmodel.SenderInfo{
+				SenderType: chatmodel.SysCmdSender,
+			},
+			Content: msgmodel.BuildGroupInvitedCmdMsg(
+				map[string]any{
+					"inviteFmtItems": fmtItems,
+					"groupMebCount":  groupMebCount,
+					"inviteHint":     hintFmt,
+				},
+			),
+		}
+
+		mills := time.Now().UnixMilli()
+		// 通知会话更新
+		// mq到engine_server, 通知客户端会话新增
+		pd := convpd.ConvAddEventPayload{
+			ConvId:         convId,
+			ConvType:       chatconst.GroupConv,
+			ChatType:       chatconst.GroupChat,
+			Title:          groupInfo.GroupName,
+			Ts:             mills,
+			Members:        newMebs,
+			MebId2UnitInfo: nil,
+			Sender:         chatmodel.SysAutoSend,
+			Receiver:       req.GroupNo,
+			RelationId:     req.GroupNo,
+			//FollowMsg:      inviteMsg,
+		}
+
+		lg := h.dl.GetLogger().With().Str("conv_id", convId).Logger()
+		lg.Debug().Msgf("group members added, conv add event will be published, pd=%+v", pd)
+
+		h.ms.SendConvAddEvent(pd, lg)
+
+		receivePd := &msgpd.MsgSendReceivePayload{
+			ConvId:           convId,
+			ConvLastActiveTs: mills,
+			MsgId:            inviteMsg.MsgId,
+			ClientUniqueId:   "",
+			MsgSeq:           0,
+			ChatType:         pd.ChatType,
+			SenderType:       chatmodel.SysCmdSender,
+			Sender:           pd.Sender,
+			Receiver:         pd.Receiver,
+			Members:          newMebs,
+			ReqId:            "",
+			SendTs:           mills,
+			MsgContent:       inviteMsg.Content,
+		}
+
+		ie := h.nsqPd.JsonPublish(
+			nsqconst.MsgReceiveTopic,
+			receivePd,
+		)
+
+		if ie != nil {
+			lg.Error().Err(ie).Msgf("publish receive payload failed after group meb removed, pd=%+v", *receivePd)
+		}
+
+		// 发送通知消息
+		notifyPd := notifypd.NotifyPayload{
+			NotifyType: chatconst.GroupNotifyType,
+			SubType:    chatconst.GroupAddMembers,
+			Members:    newMebs,
+			Data: map[string]any{
+				"convId":    chatmodel.GenerateGroupChatConvId(req.GroupNo),
+				"groupNo":   req.GroupNo,
+				"addedUids": req.Members,
+			},
+		}
+
+		ie = h.nsqPd.JsonPublish(
+			nsqconst.SrvNotifyTopic,
+			notifyPd,
+		)
+
+		if ie != nil {
+			h.dl.Error().Err(ie).Msgf("publish notify payload failed after group meb removed, pd=%+v", notifyPd)
+			return
+		}
+	})
+
+	if err != nil {
+		h.dl.Error().Err(err).Msg("group add members task submit failed")
+		// ignore this error
+		return nil, nil
+	}
 
 	return nil, nil
 }
@@ -962,130 +992,3 @@ func (h *GroupHttpHandler) HandleRemoveMembers(req AddRemMembersReq) (any, error
 
 	return nil, nil
 }
-
-/*func (h *GroupHttpHandler) HandleRemoveMembers(req AddRemMembersReq) (any,error) {
-	var req AddRemMembersReq
-	if err := c.BodyParser(&req); err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	var remUids []string
-	err := h.tm.DoInTx(
-		ctx,
-		func(_ context.Context, tx *dbr.Tx) error {
-			// 查询操作者是否有权限
-			role, ie := h.gr.GetRoleInGroup(ctx, req.GroupNo, req.Uid, tx)
-			if ie != nil {
-				return errors.Wrap(ie, "get group role failed")
-			}
-			if role > chatmodel.Manager {
-				return errors.New("no permission")
-			}
-
-			remUids, ie = h.gr.RemoveMembers(ctx, tx, req.GroupNo, req.Members)
-			if ie != nil {
-				return errors.Wrap(ie, "remove group member failed")
-			}
-
-			return nil
-		})
-
-	if err != nil {
-		return err
-	}
-
-	if len(remUids) == 0 {
-		return nil
-	}
-
-	// 更新群内成员状态
-	h.gm.OnGroupMebRemoved(req.GroupNo, remUids)
-
-	err = h.executor.Submit(func() {
-		newMebs := append([]string{req.Uid}, req.Members...)
-		// rpc查用户信息
-		rpcResp, ie := h.userProvider.UsersUnitInfo(rpccall.CreateReq(rpcuser.UsersUnitInfoReq{Uids: newMebs}))
-		if ie != nil {
-			h.dl.Error().Err(ie).Msg("rpc qry users unit info failed")
-			return
-		}
-
-		uid2info, ie := rpcResp.OkOrErr()
-		if ie != nil {
-			h.dl.Error().Err(ie).Msg("rpc qry users unit info resp not ok")
-			return
-		}
-
-		mills := time.Now().UnixMilli()
-		// 发送cmd消息, {0}修改群名称为:{groupName}
-		groupRemFmt, fmtItems := h.buildRemoveInfoFmt(uid2info, newMebs)
-		remMsg := &msgmodel.LastMsg{
-			MsgId: sfid.Next(),
-			SenderInfo: msgmodel.SenderInfo{
-				SenderType: chatmodel.SysCmdSender,
-			},
-			Content: msgmodel.BuildGroupRemoveCmdMsg(
-				map[string]any{
-					"groupRemItems": fmtItems,
-					"remHint":       groupRemFmt,
-				},
-			),
-		}
-		// 发送receivePayload
-		receivePd := &msgpd.MsgSendReceivePayload{
-			ConvId:           chatmodel.GenerateGroupChatConvId(req.GroupNo),
-			ConvLastActiveTs: mills,
-			MsgId:            remMsg.MsgId,
-			MsgSeq:           0,
-			ChatType:         chatconst.GroupChat,
-			SenderType:       chatmodel.SysCmdSender,
-			Sender:           chatmodel.SysAutoSend,
-			Receiver:         req.GroupNo,
-			Members:          newMebs,
-			SendTs:           mills,
-			MsgContent:       remMsg.Content,
-		}
-
-		ie = h.nsqPd.JsonPublish(
-			nsqconst.MsgReceiveTopic,
-			receivePd,
-		)
-
-		if ie != nil {
-			h.dl.Error().Err(ie).Msg("publish receive payload failed")
-			return
-		}
-
-		// 发送通知消息
-		pd := notifypd.NotifyPayload{
-			NotifyType: chatconst.GroupNotifyType,
-			SubType:    chatconst.GroupRemoveMembers,
-			Members:    newMebs,
-			Data: map[string]any{
-				"convId":      chatmodel.GenerateGroupChatConvId(req.GroupNo),
-				"groupNo":     req.GroupNo,
-				"removedUids": remUids,
-			},
-		}
-
-		ie = h.nsqPd.JsonPublish(
-			nsqconst.SrvNotifyTopic,
-			pd,
-		)
-
-		if ie != nil {
-			h.dl.Error().Err(ie).Msg("publish notify payload failed")
-			return
-		}
-	})
-
-	if err != nil {
-		h.dl.Error().Err(err).Msg("group remove members failed")
-		return err
-	}
-
-	return nil
-}*/

@@ -5,6 +5,7 @@ import (
 	"github.com/sweemingdow/gmicro_pkg/pkg/guc"
 	"github.com/sweemingdow/gmicro_pkg/pkg/utils/umap"
 	"github.com/sweemingdow/sdim/external/emodel/chatmodel"
+	"github.com/sweemingdow/sdim/external/emodel/usermodel"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/core"
 	"github.com/sweemingdow/sdim/micros/topicsrv/internal/repostories/grouprepo"
 	"sync"
@@ -189,6 +190,39 @@ func (gm *groupManager) OnGroupMebRemoved(grpNo string, remUids []string) {
 
 			return nil, nil
 		})
+}
+
+func (gm *groupManager) OnGroupMebAdded(ctx context.Context, groupNo string, mebsInfo []usermodel.UserUnitInfo) (int, error) {
+	_, err := gm.initGroupInfoLazy(ctx, groupNo)
+	if err != nil {
+		return 0, err
+	}
+
+	mills := time.Now().UnixMilli()
+
+	mebCountVal, _ := gm.segLock.WithLock(
+		groupNo,
+		func() (any, error) {
+			// copy
+			info, ok := gm.grpNo2info[groupNo]
+			if ok {
+				for _, mebInfo := range mebsInfo {
+					info.Meb2item[mebInfo.Uid] = &core.GroupMebItem{
+						Role:         chatmodel.OrdinaryMeb,
+						State:        chatmodel.GrpMebNormal,
+						ForbiddenSec: 0,
+						ForbiddenAt:  0,
+						Cts:          mills,
+						Uts:          mills,
+					}
+				}
+				return len(info.Meb2item), nil
+			}
+
+			return 0, nil
+		})
+
+	return mebCountVal.(int), nil
 }
 
 func (gm *groupManager) groupIno2canSendInfo(grpInfo *core.GroupInfo, sender, convId, msgClientId string) core.CanSendInfo {
